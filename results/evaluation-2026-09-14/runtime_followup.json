@@ -1,0 +1,124 @@
+[
+  {
+    "source": "/tmp/video-upscaler-audit/hd.mp4",
+    "options": [
+      "--mode",
+      "cnn",
+      "--prebuffer-mb",
+      "0"
+    ],
+    "capture": "eof",
+    "bytes": 3261988,
+    "capture_seconds": 2.9575024580117315,
+    "output_probe": [
+      {
+        "width": 3840,
+        "height": 2160,
+        "avg_frame_rate": "24/1",
+        "nb_read_frames": "195"
+      }
+    ],
+    "status": {
+      "audioTrackOrdinal": 0,
+      "audioTracks": [],
+      "bufferBytes": 0,
+      "clients": 0,
+      "durationSeconds": 8.083333,
+      "encodeBitrateBps": 17915904,
+      "file": "hd.mp4",
+      "framesProcessed": 187,
+      "memoryFootprintMB": 0,
+      "message": "",
+      "mode": "Anime4K CNN",
+      "outputHeight": 2160,
+      "outputWidth": 3840,
+      "positionSeconds": 7.791666666666667,
+      "prebufferSeconds": 0,
+      "processFps": 72.1131660619344,
+      "realtimeRatio": 3.0047152525805996,
+      "requestedScaleFactor": 2,
+      "ringCapacityBytes": 134217728,
+      "scaleFactor": 2,
+      "sessionId": 1,
+      "sourceHeight": 1080,
+      "sourceWidth": 1920,
+      "state": "finished",
+      "subtitleTrackOrdinal": 0,
+      "subtitleTracks": [],
+      "subtitles": "off",
+      "subtitlesEnabled": false,
+      "thermalState": "nominal"
+    },
+    "source_probe": [
+      {
+        "width": 1920,
+        "height": 1080,
+        "avg_frame_rate": "24/1",
+        "nb_read_frames": "194"
+      }
+    ],
+    "exitcode": 0
+  },
+  {
+    "source": "/tmp/video-upscaler-audit/tiny.mp4",
+    "options": [
+      "--mode",
+      "cnn",
+      "--prebuffer-mb",
+      "0"
+    ],
+    "capture": "eof",
+    "bytes": 215260,
+    "capture_seconds": 0.15454333403613418,
+    "output_probe": [
+      {
+        "width": 640,
+        "height": 360,
+        "avg_frame_rate": "24/1",
+        "nb_read_frames": "24"
+      }
+    ],
+    "status": {
+      "audioTrackOrdinal": 0,
+      "audioTracks": [],
+      "bufferBytes": 0,
+      "clients": 0,
+      "durationSeconds": 1,
+      "encodeBitrateBps": 2000000,
+      "file": "tiny.mp4",
+      "framesProcessed": 3,
+      "memoryFootprintMB": 0,
+      "message": "",
+      "mode": "Anime4K CNN",
+      "outputHeight": 360,
+      "outputWidth": 640,
+      "positionSeconds": 0.125,
+      "prebufferSeconds": 0,
+      "processFps": 79.3344441098733,
+      "realtimeRatio": 3.3056018379113876,
+      "requestedScaleFactor": 2,
+      "ringCapacityBytes": 134217728,
+      "scaleFactor": 2,
+      "sessionId": 1,
+      "sourceHeight": 180,
+      "sourceWidth": 320,
+      "state": "processing",
+      "subtitleTrackOrdinal": 0,
+      "subtitleTracks": [],
+      "subtitles": "off",
+      "subtitlesEnabled": false,
+      "thermalState": "nominal"
+    },
+    "source_probe": [
+      {
+        "width": 320,
+        "height": 180,
+        "sample_aspect_ratio": "1:1",
+        "display_aspect_ratio": "16:9",
+        "avg_frame_rate": "24/1",
+        "nb_read_frames": "24"
+      }
+    ],
+    "exitcode": 0
+  }
+]

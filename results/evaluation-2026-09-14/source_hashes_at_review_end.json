@@ -1,0 +1,20 @@
+{
+  "engine/Anime4KMetal/Package.swift": "47dff0f4d96c32f8521487edb2b1bcd6f4a48f1cc9c61ada094bbb45445a1dfa",
+  "engine/Anime4KMetal/Sources/an4kbench/main.swift": "6bea0411f3349f27bef0d007ff1d2255a60eb10d6935f10025fbe4382a526d26",
+  "engine/Anime4KMetal/Sources/Anime4KMetal/CNNWeights.swift": "172ad0c65664e046b7c624308deaa2f25550c331b1397e2413ee054fa0bb1b22",
+  "engine/Anime4KMetal/Sources/Anime4KMetal/Anime4KPipeline.swift": "17b4d7f8374050c8eaf59e6eed830e69b36fc44579700cb4a283c7c9e346aaa4",
+  "engine/Anime4KMetal/Sources/Anime4KMetal/MetalKernels.swift": "a1e28f794ec3531cc6055dc31e9aa8a1ddaca64ed01677a0bbcabb46bdb633c7",
+  "engine/AnimeUpscaler/Package.swift": "4da5a7e999cb7c889995a7246a888260dda826a33c79c824f776e06c088631b0",
+  "engine/AnimeUpscaler/Sources/AnimeUpscalerApp/main.swift": "a87540e677f39ee645a250c62aaa0594f11a10d4e003a72e32b19e958f7da101",
+  "engine/AnimeUpscaler/Sources/animeupscale/main.swift": "27014d99ec5e1d36265e0719a4f4c1a94c100fd077a0ecf2e0b4658e6927735a",
+  "engine/AnimeUpscaler/Sources/AnimeUpscalerCore/StreamServer.swift": "f9e37c55d0fb8325ece67420d2baad246452bd698ef3b04601754703546401b8",
+  "engine/AnimeUpscaler/Sources/AnimeUpscalerCore/MetalContext.swift": "bfac423f222ca9dfbced7a968aebbd626b69f17992a55540e6e86d7ee310bd16",
+  "engine/AnimeUpscaler/Sources/AnimeUpscalerCore/FFmpegMuxer.swift": "0f87fd871d9b617fa338f16cbe888e65ffacfd5957c7853543c62eab4633064e",
+  "engine/AnimeUpscaler/Sources/AnimeUpscalerCore/FFmpegDecoder.swift": "5b444b6eb96aeb92dd2fd714a999869ea7fb84c5095a75c86dca1fa816b06ec5",
+  "engine/AnimeUpscaler/Sources/AnimeUpscalerCore/PipelineController.swift": "53793ca2521cf9bc91ff8b7d071234ff4a3a1947057cc0eefa804b21ddbd85b4",
+  "engine/AnimeUpscaler/Sources/AnimeUpscalerCore/RingBuffer.swift": "8316f2a97d815d0912dbc1a0b3cccecbdf749c4f6e31cf4852e19f98f2602048",
+  "engine/AnimeUpscaler/Sources/AnimeUpscalerCore/OutputBufferRing.swift": "716d9a26bb3d7b61c6b8280a10eb592809417ac1f133916efc1d69fd85944a98",
+  "engine/AnimeUpscaler/Sources/AnimeUpscalerCore/StatusStore.swift": "7cb708c1a9bcc47fdbaa8f84da902658b8a7a1a16c2514be613d9ab7889fe9f8",
+  "engine/AnimeUpscaler/Sources/AnimeUpscalerCore/Upscaler.swift": "3200e373d7014a2328921b75222013f2a5a5158bf3ca99d2a8ae3dc2de4a1f53",
+  "engine/AnimeUpscaler/Sources/AnimeUpscalerCore/TextSubtitles.swift": "1be050e90f690032f448661115710d9b000175b601fe951c340969cd1229bea2"
+}

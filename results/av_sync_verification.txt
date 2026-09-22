@@ -1,0 +1,21 @@
+=== no-seek A/V confirmation (session 1 vs reference t=0) ===
+  ref    video     start=    0.000  duration=      n/a
+  ref    audio     start=    0.000  duration=      n/a
+  stream video     start=    1.400  duration=   19.820
+  stream audio     start=    1.400  duration=   19.691
+
+-- audio content alignment (20 ms RMS envelope) --
+  best lag : +0.0 ms   corr = 0.9905
+  thirds   : +0.0 ms, +0.0 ms, +0.0 ms  -> drift +0.00 ms/s
+  verdict  : OK (in sync, no drift)
+
+=== post-seek A/V confirmation (session 2 vs reference t=42) ===
+  ref    video     start=    0.000  duration=      n/a
+  ref    audio     start=    0.000  duration=      n/a
+  stream video     start=    1.421  duration=   18.018
+  stream audio     start=    1.400  duration=   18.048
+
+-- audio content alignment (20 ms RMS envelope) --
+  best lag : -20.0 ms   corr = 0.9974
+  thirds   : -20.0 ms, -20.0 ms, -20.0 ms  -> drift +0.00 ms/s
+  verdict  : OK (in sync, no drift)

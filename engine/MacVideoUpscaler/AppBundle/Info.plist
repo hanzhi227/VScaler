@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleExecutable</key>
+  <string>MacVideoUpscalerApp</string>
+  <key>CFBundleIdentifier</key>
+  <string>dev.hanzh.macvideoupscaler</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>VScaler</string>
+  <key>CFBundleDisplayName</key>
+  <string>VScaler</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>14.0</string>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.video</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSPrincipalClass</key>
+  <string>NSApplication</string>
+  <!-- Not sandboxed, on purpose: the engine spawns the Homebrew ffmpeg/ffprobe by
+       absolute path, which a sandbox would block. -->
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Video</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <!-- Alternate, so the app shows up under "Open With" without hijacking
+           double-click for formats the system player already handles. -->
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
+      <!-- Every container the engine can actually read. ffmpeg does the
+           demuxing, so this list is about what the Finder will hand over, not
+           about what the player understands. Every entry resolves to a UTI
+           macOS already declares (checked with UTType(filenameExtension:));
+           .mkv is the exception, declared below. Verified playing: mp4, m4v,
+           mov, mkv, webm (VP8/VP9), ts, m2ts, mts, flv, avi, mpeg-1, mpeg-2,
+           vob, wmv, 3gp, divx, mxf — with aac, opus, vorbis, mp3, mp2, wmav2
+           and PCM audio. -->
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>org.matroska.mkv</string>
+        <string>public.mpeg-4</string>
+        <string>com.apple.m4v-video</string>
+        <string>com.apple.quicktime-movie</string>
+        <string>public.avi</string>
+        <string>org.videolan.divx</string>
+        <string>org.webmproject.webm</string>
+        <string>public.mpeg-2-transport-stream</string>
+        <string>public.avchd-mpeg-2-transport-stream</string>
+        <string>com.adobe.flash.video</string>
+        <string>com.microsoft.windows-media-wmv</string>
+        <string>com.microsoft.advanced-systems-format</string>
+        <string>public.3gpp</string>
+        <string>org.videolan.vob</string>
+        <string>public.mpeg</string>
+        <string>public.mpeg-2-video</string>
+        <string>org.xiph.ogg-video</string>
+        <string>org.smpte.mxf</string>
+        <string>com.real.realmedia</string>
+        <string>com.real.realmedia-vbr</string>
+      </array>
+    </dict>
+  </array>
+  <!-- macOS ships no UTI for Matroska, so .mkv files have no type the Finder can
+       match against without this declaration. -->
+  <key>UTImportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>org.matroska.mkv</string>
+      <key>UTTypeDescription</key>
+      <string>Matroska Video</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.movie</string>
+      </array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array>
+          <string>mkv</string>
+        </array>
+      </dict>
+    </dict>
+  </array>
+</dict>
+</plist>

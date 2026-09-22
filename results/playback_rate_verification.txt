@@ -1,0 +1,19 @@
+Playback-rate verification — 2026-09-14 09:53
+Method validated first on a local file (must measure ~1.0x).
+
+== method check (local 40s H.264 file) ==
+method check on local file: /tmp/ratecheck_local.mp4
+  samples: 28   measured rate: 1.006x
+  -> method OK (local file measures ~1.0x)
+
+== engine stream: 640x480 source, scale 4, Naruto ep 1 ==
+captured 35.7 MB in 12s of wall time
+  video packets: 1712, median PTS spacing 33.367 ms, 67% identical
+  -> implied frame rate 29.970 fps
+  container duration: 57.1 s (content produced in 12 s of wall time)
+sampling VLC playback position for 30s (dummy outputs, no window) …
+  VLC position 0.0s -> 29.0s over 29.4s of wall time
+  engine enhancement frontier advanced 3.30x realtime
+  effective playback rate: 0.997x
+  -> OK (real time)
+  (the engine leading the player by a large margin is expected and is not skipped content: the player buffers it)

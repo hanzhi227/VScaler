@@ -1,0 +1,49 @@
+Real-ESRGAN throughput on this pipeline (Apple M5 Pro, macOS 26.6.2)
+measured 2026-09-15 22:37
+
+  python3 scripts/realesrgan/bench.py --variant animevideov3 --devices mps,cpu --iters 3
+  python3 scripts/realesrgan/bench.py --variant general-x4v3   --devices mps        --iters 3
+
+Whole network, end to end, random frames (nothing but the network is timed),
+weights from the official v0.2.5.0 release, fp32, whole frame in one pass.
+
+variant: realesr-animevideov3  (16 body convs, 621,424 params, 0.62 M MACs/px)
+
+  device   input          output          ms/frame      fps    of a 30fps budget   GFLOP
+  mps      480x270   ->   1920x1080          22.59    44.26     0.68x            160.50
+  mps      640x360   ->   2560x1440          41.39    24.16     1.24x            285.33
+  mps      854x480   ->   3416x1920          75.00    13.33     2.25x            507.64
+  mps      960x540   ->   3840x2160          89.13    11.22     2.67x            641.99
+
+  cpu      480x270   ->   1920x1080         495.32     2.02    14.86x            160.50
+  cpu      640x360   ->   2560x1440        1037.25     0.96    31.12x            285.33
+  cpu      854x480   ->   3416x1920        1612.10     0.62    48.36x            507.64
+  cpu      960x540   ->   3840x2160        2176.07     0.46    65.28x            641.99
+
+variant: realesr-general-x4v3  (32 body convs, 1,213,296 params, 1.21 M MACs/px)
+
+  mps      480x270   ->   1920x1080          47.58    21.02     1.43x            313.38
+  mps      640x360   ->   2560x1440          84.12    11.89     2.52x            557.12
+  mps      854x480   ->   3416x1920         152.54     6.56     4.58x            991.21
+  mps      960x540   ->   3840x2160         170.46     5.87     5.11x           1253.52
+
+How to read the budget column: below 1.00x means the model alone would finish a
+frame inside a 30 fps frame time; the app also decodes, composites, encodes and
+plays audio, so 1.00x is the point at which the model stops being the bottleneck,
+not the point at which playback breaks.
+
+Achieved throughput, from GFLOP and ms: 7.10-7.20 TFLOP/s for animevideov3,
+6.50-7.35 TFLOP/s for general-x4v3 - i.e. ~7.2 TFLOP/s for both, against the
+2.67 TFLOP/s a hand-written single-layer Metal kernel reached in
+scripts/bench_realesrgan_conv.swift. That gap is the error corrected in
+results/general/realesrgan_feasibility.txt.
+
+Notes:
+  * x4 only. There is no x2 checkpoint for either model, so the app's SD cases
+    (270p -> 1080p, 540p -> 1080p) fit exactly at 4x, while 540p -> 2160p would
+    not, and nothing here fits a 2x request.
+  * 640x360 -> 2560x1440 and the rows beyond it are recorded for scaling, not
+    because the app would ever ask for a 1440p output; the app clamps 4x to SD
+    sources only.
+  * CPU rows exist to show that "too slow" is a property of the CPU path, not of
+    these models. Any deployment decision here is an MPS/Metal decision.

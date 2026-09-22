@@ -1,0 +1,35 @@
+[test] session after seek: 2 (waited 18s)
+===== control events =====
+  sched= 4s wall= 4.0s  pause          state=paused     session=1 frames=298   pos=  9.9s mode=Anime4K CNN x2
+  sched= 8s wall= 8.0s  resume         state=processing session=1 frames=298   pos=  9.9s mode=Anime4K CNN x2
+  sched=12s wall=17.3s  seek   42      state=preparing  session=2 frames=0     pos= 19.9s mode=Anime4K CNN x2
+  sched=18s wall=18.0s  mode   bypass  state=processing session=2 frames=28    pos= 42.9s mode=Bypass (bilinear 2x)
+  sched=24s wall=24.0s  mode   cnn     state=processing session=2 frames=497   pos= 58.6s mode=Anime4K CNN x2
+
+===== processing state transitions =====
+  state=idle       frames=0
+  state=preparing  frames=0
+  state=processing frames=8
+  state=paused     frames=298
+  state=processing frames=298
+  state=preparing  frames=0
+  state=processing frames=1
+  state=finished   frames=526
+
+===== captured streams =====
+  controls_session1.ts       4952296 bytes   19.820133 audio video,3840,2160
+  controls_session2.ts      17017572 bytes   18.048000 audio video,3840,2160
+
+===== post-seek A/V sync (session 2 vs reference at t=42s) =====
+  reference: test-media/segments/naruto_1080p_aligned.mkv
+  stream   : /tmp/controls_session2.ts
+
+  -- ffprobe stream timing --
+    ref    video     start=    0.000  duration=      n/a
+    ref    audio     start=    0.000  duration=      n/a
+    stream video     start=    1.421  duration=   18.018
+    stream audio     start=    1.400  duration=   18.048
+
+  -- audio content alignment (20 ms RMS envelope) --
+    best lag : -20.0 ms   corr = 0.9980
+    thirds   : -20.0 ms, -20.0 ms, -20.0 ms  -> drift +0.00 ms/s

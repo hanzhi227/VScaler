@@ -1,0 +1,121 @@
+{
+  "label": "anime 480x270 -> 1920x1080 (4x)",
+  "modes": {
+    "bypass": {
+      "acutance": 0.812607616186142,
+      "acutance_ratio": 0.4757827999338881,
+      "flicker": 0.020592279901558704,
+      "flicker_ratio": 1.0,
+      "flicker_ratio_reliable": false,
+      "flicker_vs_source": 34.94804042406263,
+      "frames": 4,
+      "psnr": 34.07647492802633,
+      "smooth_rmse": 1.2875128388404846,
+      "source": "player",
+      "ssim": 0.947435587644577
+    },
+    "cnn": {
+      "acutance": 2.2892980873584747,
+      "acutance_ratio": 1.3403869619125102,
+      "flicker": 0.04266038537025452,
+      "flicker_ratio": 2.0716688765980398,
+      "flicker_ratio_reliable": false,
+      "flicker_vs_source": 72.40076764462071,
+      "frames": 4,
+      "psnr": 35.57090588043974,
+      "smooth_rmse": 1.3735841512680054,
+      "source": "player",
+      "ssim": 0.947803407907486
+    },
+    "general-x4v3": {
+      "acutance": 4.099316418170929,
+      "acutance_ratio": 2.4001550125830375,
+      "flicker": 0.0010281928116455674,
+      "flicker_ratio": 0.0499309846486566,
+      "flicker_ratio_reliable": false,
+      "flicker_vs_source": 1.7449900699145013,
+      "frames": 4,
+      "psnr": 26.175043023705612,
+      "smooth_rmse": 1.7336131632328033,
+      "source": "rendered file",
+      "ssim": 0.887015163898468
+    },
+    "metalfx": {
+      "acutance": 4.369284152984619,
+      "acutance_ratio": 2.558221467047629,
+      "flicker": 0.053186464864252644,
+      "flicker_ratio": 2.582835175051538,
+      "flicker_ratio_reliable": false,
+      "flicker_vs_source": 90.26502810639204,
+      "frames": 4,
+      "psnr": 33.84135623257298,
+      "smooth_rmse": 1.458625614643097,
+      "source": "player",
+      "ssim": 0.9288553893566132
+    },
+    "realesrgan": {
+      "acutance": 3.3678168654441833,
+      "acutance_ratio": 1.971861087674765,
+      "flicker": 0.059761400927196846,
+      "flicker_ratio": 2.9021264868623553,
+      "flicker_ratio_reliable": false,
+      "flicker_vs_source": 101.42363377860846,
+      "frames": 4,
+      "psnr": 28.361306390548513,
+      "smooth_rmse": 1.911579430103302,
+      "source": "player",
+      "ssim": 0.8958839178085327
+    },
+    "realesrgan-general": {
+      "acutance": 4.097804665565491,
+      "acutance_ratio": 2.3992698794965444,
+      "flicker": 0.05392679673704234,
+      "flicker_ratio": 2.6187870888915232,
+      "flicker_ratio_reliable": false,
+      "flicker_vs_source": 91.52147704459425,
+      "frames": 4,
+      "psnr": 26.136786700867606,
+      "smooth_rmse": 1.7475608885288239,
+      "source": "player",
+      "ssim": 0.8865692317485809
+    },
+    "rt4ksr": {
+      "acutance": 1.4513063430786133,
+      "acutance_ratio": 0.849741722471848,
+      "flicker": 0.0007242126263339411,
+      "flicker_ratio": 0.03516913279131966,
+      "flicker_ratio_reliable": false,
+      "flicker_vs_source": 1.2290922744702664,
+      "frames": 4,
+      "psnr": 35.29164348079672,
+      "smooth_rmse": 1.4636411368846893,
+      "source": "rendered file",
+      "ssim": 0.9367727190256119
+    }
+  },
+  "reference": "test-media/general/naruto_1080p_ref.mp4",
+  "reference_acutance": 1.7079381942749023,
+  "scale": 4,
+  "seq": [
+    100,
+    101,
+    102,
+    103,
+    104,
+    105,
+    106,
+    107,
+    108,
+    109,
+    110,
+    111
+  ],
+  "source": "test-media/general/naruto_270p_c28.mp4",
+  "source_flicker": 0.0005892255946739831,
+  "stills": [
+    45,
+    105,
+    165,
+    225
+  ]
+}

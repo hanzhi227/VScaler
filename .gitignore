@@ -1,0 +1,44 @@
+# --- build artifacts ---------------------------------------------------------
+.build/
+dist/
+DerivedData/
+__pycache__/
+*.pyc
+.DS_Store
+
+# --- media is never committed ------------------------------------------------
+# Test clips and frames are either generated locally (scripts/gen_synth_anime.py,
+# scripts/make_format_matrix.sh, …) or fetched from their documented sources
+# (test-media/*/README.md). Anything that plays is assumed to be somebody's
+# copyrighted work until its README says otherwise.
+
+# TV episodes / screenshots at the repo root
+/*.mkv
+/*.mp4
+/*.webm
+/*.avi
+/*.jpg
+
+# test media: keep the provenance docs and the subtitle sample, nothing that plays
+test-media/**
+!test-media/**/
+!test-media/**/*.md
+!test-media/**/*.srt
+
+# vendored upstream archives and model weights — refetch per docs/, scripts/*/README.md
+third_party/
+
+# --- results: keep measurements, drop pixels ---------------------------------
+# The verification .txt files, benchmark .json/.csv and harness .sh/.py/.lua
+# under results/ are part of the record the README cites; images, capture logs
+# and tensor dumps are reproducible and are not.
+results/**
+!results/**/
+!results/**/*.txt
+!results/**/*.md
+!results/**/*.json
+!results/**/*.jsonl
+!results/**/*.csv
+!results/**/*.sh
+!results/**/*.py
+!results/**/*.lua

@@ -1,0 +1,192 @@
+Paused comparison view — verification
+=====================================
+
+Reported: "There is a comparison view. It doesn't really work when I pause the
+video. Please make it work when I pause."
+
+Machine: Apple M5 Pro, macOS 26.6. Build: release, engine/AnimeUpscaler.
+Material: test-media/segments/naruto_t290.mkv (640x480 h264, 29.97 fps, DVD-era
+anime) -> 1280x960 at 2x. Every run below is headless; audio was fed but muted
+(--mute / _MUTE=1) so a test cannot play the film out loud.
+
+What was wrong
+--------------
+The comparison overlay is applied per frame by the video thread. Pausing parks
+that thread, so a change made while paused updated the status snapshot and the
+UI (the split label, the slider, the captions) but never reached the picture:
+no frame was produced, so nothing was composited.
+
+Measured before the change (`playercheck --compare`, pause at 4 s, then
+split/compareleft changes):
+
+    status state=paused frames=114 pos=3.804 play=3.725 cmp=True split=0.5
+    status state=paused frames=114 pos=3.804 play=3.725 cmp=True split=0.25   <- split:0.25
+    status state=paused frames=114 pos=3.804 play=3.725 cmp=True split=0.25   <- compareleft:cnn
+    status state=paused frames=114 pos=3.804 play=3.725 cmp=True split=0.25
+
+`framesProcessed` never moved and no output frame was produced, so the presented
+image could not change.
+
+How the picture is observed
+---------------------------
+A dumped frame only proves what was *rendered*. The checks below read back the
+image the display layer is actually showing, via
+`AVSampleBufferVideoRenderer.displayedPixelBuffer` (macOS 14.4+), exposed as
+`PlayerController.displayedFrame` and written by the harness verb
+`readback` (`readback` in a `--script`, or `_SPLIT_AT` for the GUI). It returns nil on an OS
+older than macOS 14.4, where the verb reports "no presented frame".
+
+What it does now
+----------------
+Once the comparison has been used in a session, the video thread keeps the last
+`poolDepth + 1` source frames (a `SourceRing`, capped by bytes for very large
+sources). A change that only affects how the picture looks — the split, either
+model, the comparison on/off — wakes the parked producer, which flushes the
+display layer (keeping the image on screen), re-renders the frame the clock has
+reached *and* the frames queued behind it, and re-queues them at their original
+timestamps. The frame on screen is replaced because its timestamp is already
+reached; the frames behind it are restored, so resuming still plays them.
+
+Verification 1 — the paused frame changes, and it is exactly the two models
+--------------------------------------------------------------------------
+`playercheck --file naruto_t290.mkv --mode cnn --scale 2 --mute --compare
+ --compareleft bypass --dump-dir <tmp> --script "3:pause,3.5:readback,
+ 4:split:0.25,4.5:readback,5:compareleft:cnn,5.5:readback,6:compare:off,
+ 6.5:readback,7:mode:bypass,7.5:readback,8:mode:cnn,8.5:compare:on,
+ 9.5:compareleft:bypass,10.5:readback,11:split:0.75,11.5:readback,12:resume,
+ 14:readback,16:readback"`
+
+The player paused at 2.729 s and the video thread parked; every change below was
+made while it stayed parked, and each row is a `readback`, i.e. the image the
+renderer was showing, compared with in-run references for the same frame (the
+reference for a model is that frame rendered with the comparison off, which is the
+plain play-path output):
+
+    step                              divider (of 1280 wide)  check                             verdict
+    A  split .50, left Original       640-641                 right 642+ == CNN ref             PASS
+    B  split .25, left Original       320-321                 left 0-319 == Original ref        PASS
+                                                              right 322+ == CNN ref             PASS
+    C  split .25, left CNN (=right)   320-321                 all but the divider == CNN ref    PASS
+    D  comparison off (mode CNN)      none                    (this is the CNN reference)       PASS
+    E  comparison off (mode bypass)   none                    (this is the Original reference)  PASS
+    F  comparison on, split .25,     320-321                 byte-identical to B               PASS
+       left Original (mode CNN)
+    G  split .75, left Original      960-961                 left 0-959 == Original ref        PASS
+                                                              right 962+ == CNN ref             PASS
+    H  after resume (playing)        -                       frame advanced, clock running     PASS
+    I  after resume (playing)        -                       same, comparison intact           PASS
+
+Every divider is exactly 2 pure-white columns at `round(1280 * split)`, and both
+halves are the *real* models' output rather than a resampling: at split 25% the
+left 320 columns match a bypass run and the right 958 match a CNN run
+byte-for-byte. The two sides differ from each other (bilinear vs Anime4K CNN:
+mean |d| 0.57, max 46 on this frame) and the difference is the one the tool
+exists to show — acutance **1.18 on the Original side against 1.96 on the
+Anime4K CNN side** of the same paused frame. The redraw is also deterministic:
+F, which reaches the same setting as B again, is byte-identical to it — so a
+slider dragged back and forth does not drift, and what is on screen is a function
+of the setting rather than of how many times it changed.
+
+Verification 2 — the paused clock does not move, and resume is seamless
+----------------------------------------------------------------------
+Same run: the render clock read 2.729 s in every status line and every readback
+through eight changes (two split values, two left-model changes, the comparison
+off then on, two enhancement-model changes), and `framesProcessed` stayed at 84 — the
+redraw re-renders frames that already exist, it does not produce new ones. On
+resume the producer refilled its queue and then held the source rate — 84 -> 146
+frames by 2 s after the resume and 206 by 4 s, i.e. 30-31 fps against the
+source's 29.97 — and the comparison stayed where it was left (divider still at
+960-961).
+
+A second run drove eight changes in one paused interval, including
+`compareleft:metalfx` (a second MetalFX scaler built while paused):
+
+    clock 2.71 s constant; frames 83 constant; no `message`;
+    renderStatus "video=rendering ... audio=rendering" throughout;
+    audioFramesEnqueued kept advancing after resume; realtime 0.99-1.01x.
+
+Verification 3 — the one case that is not exact: switching the comparison on
+while paused with nothing retained
+-------------------------------------------------------------------------------
+With `--compare` off for the whole session there is no source history to redraw
+from. In that case the still lands on the newest frame the producer has and the
+clock moves onto it (measured +0.066 s), after which it is stable:
+
+    pause            frames=84 clock 2.720
+    compare on       -> next status clock 2.786 (the stand-in), divider at 640-641
+    split 0.25       divider 320-321; clock 2.786 (unchanged)
+    compare off/on   divider none / 320-321; clock 2.786
+
+After any playback (even a second), the ring is filled and the still is the
+frame the viewer stopped on, with no clock movement — the last two readbacks of
+that run (a pause at 12 s, split changed at 12.5 s) show the divider at 768-769
+with the clock frozen at 6.786.
+
+Verification 4 — divider missing when both sides are the same model (pre-existing bug, fixed)
+----------------------------------------------------------------------------------------------
+Found while checking the above: with the same model on both sides the divider was
+never drawn, so "CNN vs CNN" showed no line at all. `SplitCompositor` sized its
+thread grid for the columns between the split and the divider while the grid is
+laid out from the origin, and `dividerSplit` declared its output texture at index
+0 where the dispatcher binds it at index 1 — so the pass painted nothing.
+Measured before the fix (split 0.25, dump at frames 40/60/80):
+
+    left=bypass (different models): divider 320-321 in all three frames
+    left=cnn    (same model)      : no white columns in any frame
+
+after:
+
+    left=cnn    (same model)      : divider 320-321 in all three frames, and the
+                                    only columns differing from a plain CNN run
+                                    are those two (0 of 1228800 pixels elsewhere)
+
+Verification 5 — the GUI path
+-----------------------------
+The app cannot be driven to move the divider by Accessibility or key equivalent
+(the presets have no shortcuts), so a hook was added in the same family as
+`_CLICK_AT`/`_KEY_AT`: `_SPLIT_AT="5:0.1,7:0.6"` calls the same
+`AppModel.setCompareSplit` the slider, the menu presets and a drag on the line
+call, at those seconds. Run against a bundle assembled with
+`scripts/make_app.sh --out /tmp/appbundle`:
+
+    launch  _COMPARE=1 _COMPARE_LEFT=bypass _SPLIT=0.25 _MUTE=1 _DIAG=1
+            _CLICK_AT=3 _SPLIT_AT="5:0.1,7:0.6" _DUMP_AT=55..79
+
+    [click] count=1 hit=PlayerView state=processing
+    [diag] state=paused frames=66 playback=2.23 ... cmp=1        <- paused by the click
+    [diag] split=0.10 state=paused comparing=1
+    [diag] state=paused frames=66 playback=2.23 ...              <- clock and frames frozen
+    [diag] split=0.60 state=paused comparing=1
+    [diag] state=paused frames=66 playback=2.23 ...
+
+    dumped frames from the playing phase (split 0.25): divider at 320-321
+    dumped frame from the paused redraw (split 0.60):  divider at 768-769
+
+So the app's own control reaches the engine and redraws the frozen frame: the
+same frame index carries a divider position set while the player was paused.
+(Note for anyone scripting the app: a click that lands within 18 pt of the line
+grabs the divider instead of pausing — with the split at 0.50 the click at the
+centre of the picture is on the line, which is how the first attempt at this run
+failed to pause.)
+
+Artifacts
+---------
+Readback PNGs and run logs: /tmp/pausecmp, /tmp/v2, /tmp/standin, /tmp/health,
+/tmp/appcheck5 (temporary). Harness code: `readback` verb in
+Sources/playercheck/main.swift; `PlayerController.displayedFrame`.
+
+One observation that did not reproduce
+--------------------------------------
+A single run that mixed the comparison with two seeks (`3:pause, 5:seek:15,
+7:seekrel:10, 9:resume, 12:pause, 18:mode:bypass, 22:pause`) returned the *same*
+image for all five readbacks, which cannot be right 19 s apart. Re-run five times
+(the same script, and a shorter one), it behaved: four distinct images and, during
+the rebuild, an honest "no presented frame" (the layer has no image right after a
+seek flushes it). Renderer health was normal in the reproducing runs
+(`video=rendering`, readiness cycling, frames at ~30 fps, no error), so a wedged
+player is not what that run showed — but the readback is a diagnostic built on
+`displayedPixelBuffer` (macOS 14.4+) and one run of it has to be treated as
+unexplained rather than fixed. Nothing above rests on that run: the verification
+readbacks were taken without seeks and cross-checked byte-for-byte against frames
+dumped independently from the render path, so the conclusions come from two
+sources agreeing rather than from the readback alone.

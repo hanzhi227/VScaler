@@ -1,0 +1,281 @@
+{
+ "name": "general-x4v3",
+ "numConv": 32,
+ "scale": 4,
+ "blobByteCount": 2436192,
+ "parameters": 1213872,
+ "convs": [
+  {
+   "outCh": 64,
+   "inCh": 4,
+   "hasActivation": true,
+   "weightOffset": 0,
+   "biasOffset": 4608,
+   "actOffset": 4864
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 5120,
+   "biasOffset": 78848,
+   "actOffset": 79104
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 79360,
+   "biasOffset": 153088,
+   "actOffset": 153344
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 153600,
+   "biasOffset": 227328,
+   "actOffset": 227584
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 227840,
+   "biasOffset": 301568,
+   "actOffset": 301824
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 302080,
+   "biasOffset": 375808,
+   "actOffset": 376064
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 376320,
+   "biasOffset": 450048,
+   "actOffset": 450304
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 450560,
+   "biasOffset": 524288,
+   "actOffset": 524544
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 524800,
+   "biasOffset": 598528,
+   "actOffset": 598784
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 599040,
+   "biasOffset": 672768,
+   "actOffset": 673024
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 673280,
+   "biasOffset": 747008,
+   "actOffset": 747264
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 747520,
+   "biasOffset": 821248,
+   "actOffset": 821504
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 821760,
+   "biasOffset": 895488,
+   "actOffset": 895744
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 896000,
+   "biasOffset": 969728,
+   "actOffset": 969984
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 970240,
+   "biasOffset": 1043968,
+   "actOffset": 1044224
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 1044480,
+   "biasOffset": 1118208,
+   "actOffset": 1118464
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 1118720,
+   "biasOffset": 1192448,
+   "actOffset": 1192704
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 1192960,
+   "biasOffset": 1266688,
+   "actOffset": 1266944
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 1267200,
+   "biasOffset": 1340928,
+   "actOffset": 1341184
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 1341440,
+   "biasOffset": 1415168,
+   "actOffset": 1415424
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 1415680,
+   "biasOffset": 1489408,
+   "actOffset": 1489664
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 1489920,
+   "biasOffset": 1563648,
+   "actOffset": 1563904
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 1564160,
+   "biasOffset": 1637888,
+   "actOffset": 1638144
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 1638400,
+   "biasOffset": 1712128,
+   "actOffset": 1712384
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 1712640,
+   "biasOffset": 1786368,
+   "actOffset": 1786624
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 1786880,
+   "biasOffset": 1860608,
+   "actOffset": 1860864
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 1861120,
+   "biasOffset": 1934848,
+   "actOffset": 1935104
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 1935360,
+   "biasOffset": 2009088,
+   "actOffset": 2009344
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 2009600,
+   "biasOffset": 2083328,
+   "actOffset": 2083584
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 2083840,
+   "biasOffset": 2157568,
+   "actOffset": 2157824
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 2158080,
+   "biasOffset": 2231808,
+   "actOffset": 2232064
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 2232320,
+   "biasOffset": 2306048,
+   "actOffset": 2306304
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 2306560,
+   "biasOffset": 2380288,
+   "actOffset": 2380544
+  },
+  {
+   "outCh": 48,
+   "inCh": 64,
+   "hasActivation": false,
+   "weightOffset": 2380800,
+   "biasOffset": 2436096,
+   "actOffset": 0
+  }
+ ]
+}

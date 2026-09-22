@@ -1,0 +1,73 @@
+[test] engine pid 58903, port 8636, log results/full_episode_20260914-103021.engine.log
+  t=  30.1s processing frames=3677   pos=  122.7 play=   92.7 rt=4.43 mem(eng=  76.7 vlc=  64.5 ff=239.8)MB lost=0 corrupt=0 disc=0
+  t=  60.2s processing frames=4459   pos=  148.8 play=  118.9 rt=2.51 mem(eng=  83.7 vlc=  65.2 ff=239.3)MB lost=0 corrupt=0 disc=0
+  t=  90.3s processing frames=6429   pos=  214.5 play=  184.5 rt=2.39 mem(eng=  95.8 vlc=  66.1 ff=242.4)MB lost=0 corrupt=0 disc=0
+  t= 120.3s processing frames=8122   pos=  271.0 play=  241.0 rt=2.27 mem(eng= 105.1 vlc=  66.1 ff=244.9)MB lost=0 corrupt=0 disc=0
+  t= 150.4s processing frames=9485   pos=  316.5 play=  286.5 rt=2.12 mem(eng= 113.5 vlc=  66.3 ff=254.0)MB lost=0 corrupt=0 disc=0
+  t= 180.5s processing frames=10323  pos=  344.4 play=  314.5 rt=1.92 mem(eng=  99.8 vlc=  61.1 ff=229.0)MB lost=0 corrupt=0 disc=0
+  t= 210.6s processing frames=10742  pos=  358.4 play=  328.7 rt=1.71 mem(eng=  80.5 vlc=  59.8 ff=219.0)MB lost=0 corrupt=0 disc=0
+  t= 240.7s processing frames=11623  pos=  387.8 play=  357.9 rt=1.62 mem(eng=  76.6 vlc=  60.0 ff=218.6)MB lost=0 corrupt=0 disc=0
+  t= 270.7s processing frames=12175  pos=  406.2 play=  376.4 rt=1.51 mem(eng=  86.5 vlc=  60.7 ff=219.0)MB lost=0 corrupt=0 disc=0
+  t= 300.8s processing frames=12680  pos=  423.1 play=  393.1 rt=1.42 mem(eng=  95.3 vlc=  60.9 ff=218.7)MB lost=0 corrupt=0 disc=0
+  t= 330.9s processing frames=13697  pos=  457.0 play=  427.3 rt=1.40 mem(eng= 101.6 vlc=  61.2 ff=219.1)MB lost=0 corrupt=0 disc=0
+  t= 360.9s processing frames=14467  pos=  482.7 play=  453.1 rt=1.34 mem(eng= 109.1 vlc=  61.3 ff=218.7)MB lost=0 corrupt=0 disc=0
+  t= 391.0s processing frames=14972  pos=  499.6 play=  469.9 rt=1.28 mem(eng= 101.8 vlc=  60.8 ff=220.4)MB lost=0 corrupt=0 disc=0
+  t= 421.1s processing frames=15796  pos=  527.1 play=  497.1 rt=1.25 mem(eng=  88.5 vlc=  50.3 ff=212.8)MB lost=0 corrupt=0 disc=0
+  t= 451.2s processing frames=16222  pos=  541.3 play=  511.3 rt=1.20 mem(eng=  99.5 vlc=  55.7 ff=214.5)MB lost=0 corrupt=0 disc=0
+  t= 481.3s processing frames=16841  pos=  561.9 play=  531.9 rt=1.17 mem(eng= 108.2 vlc=  60.0 ff=215.3)MB lost=0 corrupt=0 disc=0
+  t= 511.4s processing frames=17461  pos=  582.6 play=  552.8 rt=1.14 mem(eng= 108.2 vlc=  60.2 ff=214.1)MB lost=0 corrupt=0 disc=0
+  t= 541.4s processing frames=18539  pos=  618.6 play=  588.6 rt=1.14 mem(eng= 120.0 vlc=  61.0 ff=216.8)MB lost=0 corrupt=0 disc=0
+  t= 571.5s processing frames=19771  pos=  659.7 play=  629.9 rt=1.16 mem(eng= 132.7 vlc=  61.2 ff=217.9)MB lost=0 corrupt=0 disc=0
+  t= 601.6s processing frames=20817  pos=  694.6 play=  664.9 rt=1.16 mem(eng= 144.0 vlc=  61.2 ff=217.5)MB lost=0 corrupt=0 disc=0
+  t= 631.7s processing frames=22083  pos=  736.8 play=  707.2 rt=1.17 mem(eng= 152.8 vlc=  61.2 ff=215.6)MB lost=0 corrupt=0 disc=0
+  t= 661.7s processing frames=23158  pos=  772.7 play=  742.9 rt=1.17 mem(eng= 152.7 vlc=  60.9 ff=215.8)MB lost=0 corrupt=0 disc=0
+  t= 691.8s processing frames=25090  pos=  837.2 play=  807.8 rt=1.21 mem(eng= 155.1 vlc=  61.7 ff=224.7)MB lost=0 corrupt=0 disc=0
+  t= 721.9s processing frames=25852  pos=  862.6 play=  833.2 rt=1.20 mem(eng= 160.4 vlc=  62.0 ff=224.0)MB lost=0 corrupt=0 disc=0
+  t= 752.0s processing frames=26723  pos=  891.7 play=  861.7 rt=1.19 mem(eng= 162.9 vlc=  61.9 ff=225.0)MB lost=0 corrupt=0 disc=0
+  t= 782.0s processing frames=27561  pos=  919.6 play=  889.6 rt=1.18 mem(eng= 163.3 vlc=  62.2 ff=225.0)MB lost=0 corrupt=0 disc=0
+  t= 812.1s processing frames=28045  pos=  935.8 play=  906.0 rt=1.15 mem(eng= 163.3 vlc=  62.2 ff=225.9)MB lost=0 corrupt=0 disc=0
+  t= 842.2s processing frames=28641  pos=  955.7 play=  925.7 rt=1.14 mem(eng= 163.4 vlc=  62.2 ff=228.0)MB lost=0 corrupt=0 disc=0
+  t= 872.3s processing frames=29312  pos=  978.0 play=  948.3 rt=1.13 mem(eng= 165.3 vlc=  62.2 ff=227.7)MB lost=0 corrupt=0 disc=0
+  t= 902.3s processing frames=30018  pos= 1001.6 play=  971.7 rt=1.11 mem(eng= 165.6 vlc=  62.2 ff=225.8)MB lost=0 corrupt=0 disc=0
+  t= 932.4s processing frames=30591  pos= 1020.7 play=  990.9 rt=1.10 mem(eng= 163.0 vlc=  61.8 ff=215.9)MB lost=0 corrupt=0 disc=0
+  t= 962.5s processing frames=32170  pos= 1073.4 play= 1043.6 rt=1.12 mem(eng=  76.9 vlc=  44.9 ff=212.9)MB lost=0 corrupt=0 disc=0
+  t= 992.6s processing frames=32963  pos= 1099.9 play= 1069.9 rt=1.11 mem(eng=  83.3 vlc=  52.0 ff=211.8)MB lost=0 corrupt=0 disc=0
+  t=1022.6s processing frames=33896  pos= 1131.0 play= 1101.0 rt=1.11 mem(eng=  49.1 vlc=  46.6 ff=201.4)MB lost=0 corrupt=0 disc=0
+  t=1052.7s processing frames=34346  pos= 1146.0 play= 1116.0 rt=1.09 mem(eng=  57.7 vlc=  50.3 ff=197.2)MB lost=0 corrupt=0 disc=0
+  t=1082.8s processing frames=35071  pos= 1170.2 play= 1140.6 rt=1.08 mem(eng=  64.5 vlc=  56.1 ff=201.8)MB lost=0 corrupt=0 disc=0
+  t=1112.9s processing frames=36725  pos= 1225.4 play= 1195.5 rt=1.10 mem(eng=  52.2 vlc=  45.5 ff=198.8)MB lost=0 corrupt=0 disc=0
+  t=1143.0s processing frames=37705  pos= 1258.1 play= 1228.2 rt=1.10 mem(eng=  48.6 vlc=  39.3 ff=197.4)MB lost=0 corrupt=0 disc=0
+  t=1173.0s processing frames=38739  pos= 1292.6 play= 1262.9 rt=1.10 mem(eng=  64.3 vlc=  51.8 ff=205.5)MB lost=0 corrupt=0 disc=0
+  t=1203.1s processing frames=39269  pos= 1310.3 play= 1281.0 rt=1.09 mem(eng=  66.8 vlc=  51.8 ff=202.1)MB lost=0 corrupt=0 disc=0
+  t=1233.2s processing frames=39816  pos= 1328.5 play= 1299.3 rt=1.08 mem(eng=  72.8 vlc=  51.9 ff=200.9)MB lost=0 corrupt=0 disc=0
+  t=1263.3s processing frames=41081  pos= 1370.7 play= 1340.8 rt=1.09 mem(eng=  83.3 vlc=  52.5 ff=202.9)MB lost=0 corrupt=0 disc=0
+  t=1293.3s processing frames=41680  pos= 1390.7 play= 1360.8 rt=1.08 mem(eng=  89.3 vlc=  51.4 ff=203.6)MB lost=0 corrupt=0 disc=0
+  t=1323.4s finished   frames=42387  pos= 1413.8 play= 1383.8 rt=1.07 mem(eng=  97.2 vlc=  53.2 ff=  0.0)MB lost=0 corrupt=0 disc=0
+[test] engine reached finished
+[test] wrote results/full_episode_20260914-103021.csv
+
+===== summary =====
+  duration sampled : 1323s (44 samples)
+  end state        : finished  frames=42387 position=1413.8s
+  player metrics   : present
+  dropped/corrupt  : lost=0 corrupt=0 discontinuity=0 displayed=39559
+  engine RSS       : 76.7 -> 97.2 MB (peak 165.6)
+  engine footprint : 81.3 -> 228.2 MB
+  VLC RSS          : 64.5 -> 53.2 MB (peak 66.3)
+  thermal states   : ['nominal']
+  growth rate      : first half 7.1 MB/min, second half -5.5 MB/min
+  plateau          : yes (growth falling)
+
+PASS: player=yes, dropped=0, state=finished
+
+=== interpretation ===
+Complete episode (Naruto ep 1, 1414.4 s, 640x480 -> 1280x960, CNN x2), launched with
+its own headless VLC so no window appeared. 44 samples over 1323 s of wall time.
+
+  produced 42,387 frames; 1414 s at 29.97 fps = 42,383 expected -> frame count preserved
+  VLC: 0 lost, 0 corrupt, 0 discontinuities (39,559 "displayed" is not authoritative
+       with a dummy video output; the decode path reported no losses)
+  engine RSS 76.7 -> 97.2 MB, peak 165.6; second-half growth -5.5 MB/min -> PLATEAU
+  engine phys_footprint 81.3 -> 228.2 MB
+  thermal nominal throughout; sustained throughput settled at ~1.08x (throttled by the
+  bounded read-ahead; the 2.1-2.5x figure is peak capability)

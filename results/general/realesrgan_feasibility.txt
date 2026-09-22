@@ -1,0 +1,77 @@
+Real-ESRGAN feasibility on this pipeline (Apple M5 Pro, macOS 26.6.2)
+
+  Original projection: measured 2026-09-15 20:07
+  Correction:          measured 2026-09-15 22:37
+
+================================================================================
+CORRECTION - the projection below overstates the cost by ~2.6x
+================================================================================
+
+The projection further down was made from a single-layer Swift microbenchmark and
+concludes that Real-ESRGAN-class models are far too slow to play live. That
+conclusion is wrong. The same architecture family measured end-to-end through
+PyTorch/MPS (scripts/realesrgan/bench.py) runs at ~7.2 TFLOP/s, not the 2.67
+TFLOP/s the microbenchmark achieved, because the microbenchmark timed one layer in
+isolation - paying per-dispatch overhead once against a single layer's arithmetic -
+and then scaled that layer's achieved rate to a whole network.
+
+Measured, whole network, random frames, MPS, iters=3. Full table including CPU:
+results/general/realesrgan_bench.txt.
+
+  realesr-animevideov3   (16 body convs, 0.62 M MACs/px, 621,424 params)
+    480x270 -> 1920x1080     22.59 ms/frame   44.26 fps   0.68x of a 30fps budget
+    640x360 -> 2560x1440     41.39 ms/frame   24.16 fps   1.24x
+    854x480 -> 3416x1920     75.00 ms/frame   13.33 fps   2.25x
+    960x540 -> 3840x2160     89.13 ms/frame   11.22 fps   2.67x
+
+  realesr-general-x4v3   (32 body convs, 1.21 M MACs/px, 1,213,296 params)
+    480x270 -> 1920x1080     47.58 ms/frame   21.02 fps   1.43x
+    640x360 -> 2560x1440     84.12 ms/frame   11.89 fps   2.52x
+    854x480 -> 3416x1920    152.54 ms/frame    6.56 fps   4.58x
+    960x540 -> 3840x2160    170.46 ms/frame    5.87 fps   5.11x
+
+Against the projection's own case - general-x4v3 at a 640x480 input, projected at
+277.7 ms - the measurement brackets it at 84 ms (640x360) to 152 ms (854x480),
+i.e. roughly 100-110 ms interpolated. So that projection was ~2.6x too
+pessimistic, and "0.12x real time at 480p" should read as ~0.45x.
+
+What this changes, and what it does not:
+
+  * animevideov3 does fit the app's SD 4x case. 270p -> 1080p at 44 fps through
+    PyTorch is already past 30 fps, and a hand-written Metal port would be cheaper
+    again than the MPS graph. This is the one model in the Real-ESRGAN family that
+    is a candidate for a live mode here, and it is the model recommended for
+    anime detail.
+  * general-x4v3 at 270p -> 1080p is 21 fps: near real time, not real time, and it
+    is the heavier model by design (2x the MACs).
+  * CPU inference is what is genuinely unplayable - 495 ms/frame at 270p and worse
+    beyond - 20x slower than MPS. Any claim of the form "this model is too slow"
+    is true of the CPU path and false of the GPU path.
+  * x2plus and the other heavier Real-ESRGAN variants were never measured, before
+    or now, and are not covered by this correction. RealBasicVSR's objection is
+    unchanged and is not a throughput claim at all: it needs optical flow and a
+    sequence window, so it is a batch model regardless of speed.
+
+The "10-100x too slow to play" phrasing in docs/GENERAL-VIDEO-UPSCALING.md and
+README.md is corrected to match this file.
+
+================================================================================
+ORIGINAL PROJECTION (kept as the record of what was measured and how it misled)
+================================================================================
+
+device: Apple M5 Pro
+one 3x3 64->64 fp32 PReLU layer at 640x480: 8.467 ms  (2.67 TFLOP/s achieved)
+general-x4v3: 1.21 M MACs per input pixel (32 body layers dominate)
+projected whole network, same kernel, no allowance for pixel-shuffle or I/O:
+  480p  640x480      277.7 ms/frame    3.60 fps   0.12x realtime @30fps
+  SD-wide  854x480      370.5 ms/frame    2.70 fps   0.09x realtime @30fps
+  540p  960x540      468.6 ms/frame    2.13 fps   0.07x realtime @30fps
+  720p 1280x720      833.1 ms/frame    1.20 fps   0.04x realtime @30fps
+  1080p 1920x1080    1874.4 ms/frame   0.53 fps   0.02x realtime @30fps
+
+Why the extrapolation failed: the layer measured is one of 18-34 in the network
+and ran alone, so the per-dispatch overhead was charged once to a single layer's
+arithmetic; multiplying that rate by layer count then assumed a single hand-
+written layer is the ceiling for the whole network, when the framework reaches
+~7.2 TFLOP/s on the same arithmetic. It is a valid single-layer number and an
+invalid network projection.

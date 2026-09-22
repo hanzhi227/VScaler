@@ -1,0 +1,8 @@
+wall,state,frames,position,playback,playback_active,rt_ratio,thermal,footprint_mb,engine_rss_mb,vlc_rss_mb,ffmpeg_rss_mb,vlc_state,vlc_time,displayed,lost,corrupt,discontinuity
+10.1,processing,923,330.8,302,True,3.21,nominal,124.1,64.3,53.0,225.3,playing,3,73,0,0,0
+20.2,processing,2138,371.3,312,True,3.18,nominal,156.4,42.9,44.8,215.1,playing,13,378,0,0,0
+30.3,processing,3113,403.9,323,True,3.2,nominal,181.7,67.7,51.0,215.9,playing,23,673,0,0,0
+40.3,processing,4049,435.1,333,True,3.21,nominal,209.4,96.1,52.2,216.9,playing,33,978,0,0,0
+50.4,processing,5024,467.6,342,True,3.19,nominal,237.8,124.8,55.5,217.2,playing,43,1281,0,0,0
+60.5,processing,7993,566.7,353,True,14.63,nominal,337.6,227.9,59.0,221.7,playing,53,1586,0,0,0
+70.6,processing,12115,704.2,363,True,13.58,nominal,474.5,361.8,60.3,221.9,playing,63,1882,0,0,0

@@ -1,0 +1,90 @@
+{
+  "label": "live action SHARP 1920x1080 -> 3840x2160",
+  "modes": {
+    "bypass": {
+      "acutance": 2.0663305123647056,
+      "acutance_ratio": 0.5631169894490616,
+      "flicker": 0.4117072480065482,
+      "flicker_ratio": 1.0,
+      "flicker_ratio_reliable": false,
+      "flicker_vs_source": 0.9149404327372098,
+      "frames": 3,
+      "psnr": 33.03110574390601,
+      "smooth_rmse": 2.6168289184570312,
+      "source": "player",
+      "ssim": 0.9330102801322937
+    },
+    "cnn": {
+      "acutance": 3.3108913898468018,
+      "acutance_ratio": 0.9022850800909443,
+      "flicker": 0.4791982216494424,
+      "flicker_ratio": 1.1639295250925987,
+      "flicker_ratio_reliable": false,
+      "flicker_vs_source": 1.0649261833638375,
+      "frames": 3,
+      "psnr": 33.49665226204207,
+      "smooth_rmse": 2.595606486002604,
+      "source": "player",
+      "ssim": 0.9376808603604635
+    },
+    "cnnDenoise": {
+      "acutance": 3.2057299613952637,
+      "acutance_ratio": 0.8736264571642453,
+      "flicker": 0.46784456287111553,
+      "flicker_ratio": 1.1363525056611938,
+      "flicker_ratio_reliable": false,
+      "flicker_vs_source": 1.0396948532716652,
+      "frames": 3,
+      "psnr": 33.53359988483726,
+      "smooth_rmse": 2.5771477222442627,
+      "source": "player",
+      "ssim": 0.9388383626937866
+    },
+    "metalfx": {
+      "acutance": 5.646742184956868,
+      "acutance_ratio": 1.5388518150220782,
+      "flicker": 0.6448838881083897,
+      "flicker_ratio": 1.5663651568702353,
+      "flicker_ratio_reliable": false,
+      "flicker_vs_source": 1.4331308144513406,
+      "frames": 3,
+      "psnr": 32.76189739496271,
+      "smooth_rmse": 2.8266448974609375,
+      "source": "player",
+      "ssim": 0.91897980372111
+    },
+    "rt4ksr": {
+      "acutance": 3.016906261444092,
+      "acutance_ratio": 0.8221681677875603,
+      "flicker": 0.5061160922050476,
+      "flicker_ratio": 1.229310619756196,
+      "flicker_ratio_reliable": false,
+      "flicker_vs_source": 1.1247459904081816,
+      "frames": 3,
+      "psnr": 33.516451823240665,
+      "smooth_rmse": 2.68769637743632,
+      "source": "rendered file",
+      "ssim": 0.9326194127400717
+    }
+  },
+  "reference": "/tmp/metro_2160p_ref.mp4",
+  "reference_acutance": 3.6694515546162925,
+  "scale": 2,
+  "seq": [
+    60,
+    61,
+    62,
+    63,
+    64,
+    65,
+    66,
+    67
+  ],
+  "source": "/tmp/metro_1080p_c30.mp4",
+  "source_flicker": 0.44998257075037273,
+  "stills": [
+    45,
+    105,
+    165
+  ]
+}

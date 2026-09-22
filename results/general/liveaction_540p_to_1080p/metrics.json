@@ -1,0 +1,95 @@
+{
+  "label": "live action 960x540 -> 1920x1080",
+  "modes": {
+    "bypass": {
+      "acutance": 1.7745708525180817,
+      "acutance_ratio": 0.539338033034401,
+      "flicker": 17.569402261213824,
+      "flicker_ratio": 1.0,
+      "flicker_ratio_reliable": true,
+      "flicker_vs_source": 0.9791389936375486,
+      "frames": 4,
+      "psnr": 32.95418934603605,
+      "smooth_rmse": 3.719978928565979,
+      "source": "player",
+      "ssim": 0.9161558002233505
+    },
+    "cnn": {
+      "acutance": 2.5199312567710876,
+      "acutance_ratio": 0.7658723603401325,
+      "flicker": 17.94456854733554,
+      "flicker_ratio": 1.0213533892925846,
+      "flicker_ratio_reliable": true,
+      "flicker_vs_source": 1.0000469297402408,
+      "frames": 4,
+      "psnr": 32.9647770713963,
+      "smooth_rmse": 3.5661932826042175,
+      "source": "player",
+      "ssim": 0.9140521734952927
+    },
+    "cnnDenoise": {
+      "acutance": 2.389383375644684,
+      "acutance_ratio": 0.7261954788430574,
+      "flicker": 17.907943378795277,
+      "flicker_ratio": 1.0192687897145378,
+      "flicker_ratio_reliable": true,
+      "flicker_vs_source": 0.9980058170072548,
+      "frames": 4,
+      "psnr": 33.0223403845585,
+      "smooth_rmse": 3.537787437438965,
+      "source": "player",
+      "ssim": 0.9158337265253067
+    },
+    "metalfx": {
+      "acutance": 5.721857190132141,
+      "acutance_ratio": 1.7390205625493158,
+      "flicker": 18.470988793806598,
+      "flicker_ratio": 1.0513157203181074,
+      "flicker_ratio_reliable": true,
+      "flicker_vs_source": 1.0293842163876064,
+      "frames": 4,
+      "psnr": 32.44191185993394,
+      "smooth_rmse": 3.8072630763053894,
+      "source": "player",
+      "ssim": 0.8932179808616638
+    },
+    "rt4ksr": {
+      "acutance": 2.4572709798812866,
+      "acutance_ratio": 0.7468282796604675,
+      "flicker": 18.0076153495095,
+      "flicker_ratio": 1.02494183249837,
+      "flicker_ratio_reliable": true,
+      "flicker_vs_source": 1.0035605144094788,
+      "frames": 4,
+      "psnr": 32.83702451576963,
+      "smooth_rmse": 3.6554535031318665,
+      "source": "rendered file",
+      "ssim": 0.9075039178133011
+    }
+  },
+  "reference": "test-media/liveaction/tt_1080p_ref.mp4",
+  "reference_acutance": 3.290275752544403,
+  "scale": 2,
+  "seq": [
+    100,
+    101,
+    102,
+    103,
+    104,
+    105,
+    106,
+    107,
+    108,
+    109,
+    110,
+    111
+  ],
+  "source": "test-media/liveaction/tt_540p_c30.mp4",
+  "source_flicker": 17.943726452914152,
+  "stills": [
+    45,
+    105,
+    165,
+    225
+  ]
+}

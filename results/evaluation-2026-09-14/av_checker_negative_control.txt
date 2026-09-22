@@ -1,0 +1,14 @@
+reference: test-media/segments/subs_text.mkv
+stream   : /tmp/video-upscaler-audit/delayed-video.ts
+
+-- ffprobe stream timing --
+  ref    video     start=    0.000  duration=      n/a
+  ref    audio     start=    0.000  duration=      n/a
+  ref    subtitle  start=    0.000  duration=   60.026
+  stream video     start=    2.421  duration=    7.173
+  stream audio     start=    1.400  duration=    7.979
+
+-- audio content alignment (20 ms RMS envelope) --
+  best lag : -20.0 ms   corr = 0.9967
+  thirds   : -20.0 ms, -20.0 ms, -20.0 ms  -> drift +0.00 ms/s
+  verdict  : OK (in sync, no drift)

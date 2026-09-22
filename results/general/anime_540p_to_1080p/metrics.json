@@ -1,0 +1,95 @@
+{
+  "label": "anime 960x540 -> 1920x1080",
+  "modes": {
+    "bypass": {
+      "acutance": 1.1139610707759857,
+      "acutance_ratio": 0.6522256335211901,
+      "flicker": 0.0015079177127600733,
+      "flicker_ratio": 1.0,
+      "flicker_ratio_reliable": false,
+      "flicker_vs_source": 0.9790962939567823,
+      "frames": 4,
+      "psnr": 39.416269220127184,
+      "smooth_rmse": 0.8905252814292908,
+      "source": "player",
+      "ssim": 0.9731865227222443
+    },
+    "cnn": {
+      "acutance": 2.2093215584754944,
+      "acutance_ratio": 1.2935606018304733,
+      "flicker": 0.0016874765993138267,
+      "flicker_ratio": 1.11907737738891,
+      "flicker_ratio_reliable": false,
+      "flicker_vs_source": 1.0956845128523574,
+      "frames": 4,
+      "psnr": 39.22436204408063,
+      "smooth_rmse": 0.9713184684514999,
+      "source": "player",
+      "ssim": 0.9690445512533188
+    },
+    "cnnDenoise": {
+      "acutance": 1.5918654203414917,
+      "acutance_ratio": 0.9320392422146816,
+      "flicker": 0.0016559547908731145,
+      "flicker_ratio": 1.098173180711616,
+      "flicker_ratio_reliable": false,
+      "flicker_vs_source": 1.075217291357475,
+      "frames": 4,
+      "psnr": 39.33207322302946,
+      "smooth_rmse": 0.8856735229492188,
+      "source": "player",
+      "ssim": 0.9730236083269119
+    },
+    "metalfx": {
+      "acutance": 3.7231958508491516,
+      "acutance_ratio": 2.1799359387415174,
+      "flicker": 0.0025769705217416313,
+      "flicker_ratio": 1.7089596467600194,
+      "flicker_ratio_reliable": false,
+      "flicker_vs_source": 1.6732360566644269,
+      "frames": 4,
+      "psnr": 37.505217810078065,
+      "smooth_rmse": 1.0374199897050858,
+      "source": "player",
+      "ssim": 0.9551698118448257
+    },
+    "rt4ksr": {
+      "acutance": 1.73767751455307,
+      "acutance_ratio": 1.0174124101081967,
+      "flicker": 0.0018217914065727118,
+      "flicker_ratio": 1.2081504124241158,
+      "flicker_ratio_reliable": false,
+      "flicker_vs_source": 1.1828955913468098,
+      "frames": 4,
+      "psnr": 38.68043787627778,
+      "smooth_rmse": 0.9589361995458603,
+      "source": "rendered file",
+      "ssim": 0.9654772579669952
+    }
+  },
+  "reference": "test-media/general/naruto_1080p_ref.mp4",
+  "reference_acutance": 1.7079381942749023,
+  "scale": 2,
+  "seq": [
+    100,
+    101,
+    102,
+    103,
+    104,
+    105,
+    106,
+    107,
+    108,
+    109,
+    110,
+    111
+  ],
+  "source": "test-media/general/naruto_540p_c30.mp4",
+  "source_flicker": 0.0015401117561850697,
+  "stills": [
+    45,
+    105,
+    165,
+    225
+  ]
+}

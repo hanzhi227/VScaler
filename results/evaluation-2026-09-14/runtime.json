@@ -1,0 +1,207 @@
+[
+  {
+    "source": "/tmp/video-upscaler-audit/tiny.mp4",
+    "options": [
+      "--mode",
+      "cnn"
+    ],
+    "capture": "timed out",
+    "bytes": 0,
+    "capture_seconds": 5.001544583006762,
+    "status": {
+      "audioTrackOrdinal": 0,
+      "audioTracks": [],
+      "bufferBytes": 0,
+      "clients": 1,
+      "durationSeconds": 1,
+      "encodeBitrateBps": 2000000,
+      "file": "tiny.mp4",
+      "framesProcessed": 1,
+      "memoryFootprintMB": 0,
+      "message": "",
+      "mode": "Anime4K CNN",
+      "outputHeight": 360,
+      "outputWidth": 640,
+      "positionSeconds": 0.041666666666666664,
+      "prebufferSeconds": 0,
+      "processFps": 8.732711774773161,
+      "realtimeRatio": 0.3638629906155484,
+      "requestedScaleFactor": 2,
+      "ringCapacityBytes": 134217728,
+      "scaleFactor": 2,
+      "sessionId": 1,
+      "sourceHeight": 180,
+      "sourceWidth": 320,
+      "state": "finished",
+      "subtitleTrackOrdinal": 0,
+      "subtitleTracks": [],
+      "subtitles": "off",
+      "subtitlesEnabled": false,
+      "thermalState": "nominal"
+    },
+    "source_probe": [
+      {
+        "width": 320,
+        "height": 180,
+        "sample_aspect_ratio": "1:1",
+        "display_aspect_ratio": "16:9",
+        "avg_frame_rate": "24/1",
+        "nb_read_frames": "24"
+      }
+    ],
+    "exitcode": 0
+  },
+  {
+    "source": "/tmp/video-upscaler-audit/anamorphic.mp4",
+    "options": [
+      "--mode",
+      "bypass",
+      "--prebuffer-mb",
+      "0"
+    ],
+    "capture": "eof",
+    "bytes": 2745364,
+    "capture_seconds": 0.6727804589318112,
+    "output_probe": [
+      {
+        "width": 1440,
+        "height": 960,
+        "avg_frame_rate": "24/1",
+        "nb_read_frames": "192"
+      }
+    ],
+    "status": {
+      "audioTrackOrdinal": 0,
+      "audioTracks": [],
+      "bufferBytes": 0,
+      "clients": 0,
+      "durationSeconds": 8,
+      "encodeBitrateBps": 2985984,
+      "file": "anamorphic.mp4",
+      "framesProcessed": 143,
+      "memoryFootprintMB": 0,
+      "message": "",
+      "mode": "Bypass (bilinear)",
+      "outputHeight": 960,
+      "outputWidth": 1440,
+      "positionSeconds": 5.958333333333333,
+      "prebufferSeconds": 0,
+      "processFps": 400.9549044064255,
+      "realtimeRatio": 16.70645435026773,
+      "requestedScaleFactor": 2,
+      "ringCapacityBytes": 134217728,
+      "scaleFactor": 2,
+      "sessionId": 1,
+      "sourceHeight": 480,
+      "sourceWidth": 720,
+      "state": "finished",
+      "subtitleTrackOrdinal": 0,
+      "subtitleTracks": [],
+      "subtitles": "off",
+      "subtitlesEnabled": false,
+      "thermalState": "nominal"
+    },
+    "source_probe": [
+      {
+        "width": 720,
+        "height": 480,
+        "sample_aspect_ratio": "32:27",
+        "display_aspect_ratio": "16:9",
+        "avg_frame_rate": "24/1",
+        "nb_read_frames": "192"
+      }
+    ],
+    "exitcode": 0
+  },
+  {
+    "source": "/tmp/video-upscaler-audit/hd.mp4",
+    "options": [
+      "--mode",
+      "cnn",
+      "--prebuffer-mb",
+      "0"
+    ],
+    "capture": "eof",
+    "bytes": 849760,
+    "capture_seconds": 0.991719749988988,
+    "output_probe": [
+      {
+        "width": 3840,
+        "height": 2160,
+        "avg_frame_rate": "24/1",
+        "nb_read_frames": "50"
+      }
+    ],
+    "error": "URLError(ConnectionRefusedError(61, 'Connection refused'))",
+    "exitcode": -15
+  },
+  {
+    "source": "test-media/segments/subs_text.mkv",
+    "options": [
+      "--mode",
+      "bypass",
+      "--script",
+      "1:subs-on:0,5:subs-off"
+    ],
+    "status": {
+      "audioTrackOrdinal": 0,
+      "audioTracks": [
+        {
+          "channels": 2,
+          "codec": "aac",
+          "index": 1,
+          "language": "eng",
+          "ordinal": 0,
+          "title": "Stereo"
+        }
+      ],
+      "bufferBytes": 2159180,
+      "clients": 0,
+      "durationSeconds": 60.026,
+      "encodeBitrateBps": 22372507,
+      "file": "subs_text.mkv",
+      "framesProcessed": 398,
+      "memoryFootprintMB": 0,
+      "message": "",
+      "mode": "Bypass (bilinear)",
+      "outputHeight": 2160,
+      "outputWidth": 3840,
+      "positionSeconds": 16.4159,
+      "prebufferSeconds": 0.7720833431854552,
+      "processFps": 73.55627140307244,
+      "realtimeRatio": 2.454327589149184,
+      "requestedScaleFactor": 2,
+      "ringCapacityBytes": 134217728,
+      "scaleFactor": 2,
+      "sessionId": 2,
+      "sourceHeight": 1080,
+      "sourceWidth": 1920,
+      "state": "processing",
+      "subtitleTrackOrdinal": 0,
+      "subtitleTracks": [
+        {
+          "codec": "subrip",
+          "index": 2,
+          "ordinal": 0
+        }
+      ],
+      "subtitles": "off",
+      "subtitlesEnabled": false,
+      "thermalState": "nominal"
+    },
+    "source_probe": [
+      {
+        "width": 1920,
+        "height": 1080,
+        "sample_aspect_ratio": "3:4",
+        "display_aspect_ratio": "4:3",
+        "color_space": "smpte170m",
+        "color_transfer": "bt709",
+        "color_primaries": "smpte170m",
+        "avg_frame_rate": "30000/1001",
+        "nb_read_frames": "1799"
+      }
+    ],
+    "exitcode": 0
+  }
+]

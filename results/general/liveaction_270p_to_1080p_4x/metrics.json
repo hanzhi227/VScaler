@@ -1,0 +1,121 @@
+{
+  "label": "live action 480x270 -> 1920x1080 (4x)",
+  "modes": {
+    "bypass": {
+      "acutance": 1.2844864130020142,
+      "acutance_ratio": 0.39038868155920003,
+      "flicker": 16.488027832724832,
+      "flicker_ratio": 1.0,
+      "flicker_ratio_reliable": true,
+      "flicker_vs_source": 0.9265375446341949,
+      "frames": 4,
+      "psnr": 29.27659095027992,
+      "smooth_rmse": 5.246549963951111,
+      "source": "player",
+      "ssim": 0.8711986690759659
+    },
+    "cnn": {
+      "acutance": 2.5268794894218445,
+      "acutance_ratio": 0.7679841081610814,
+      "flicker": 17.934316461736504,
+      "flicker_ratio": 1.0877175028866177,
+      "flicker_ratio_reliable": true,
+      "flicker_vs_source": 1.0078111043802045,
+      "frames": 4,
+      "psnr": 29.895684755329857,
+      "smooth_rmse": 4.769763827323914,
+      "source": "player",
+      "ssim": 0.8718773871660233
+    },
+    "general-x4v3": {
+      "acutance": 3.435242474079132,
+      "acutance_ratio": 1.0440591404603778,
+      "flicker": 20.168976957147773,
+      "flicker_ratio": 1.2232498126378177,
+      "flicker_ratio_reliable": true,
+      "flicker_vs_source": 1.1333868778756826,
+      "frames": 4,
+      "psnr": 26.363453832696386,
+      "smooth_rmse": 5.370230793952942,
+      "source": "rendered file",
+      "ssim": 0.8503709882497787
+    },
+    "metalfx": {
+      "acutance": 6.563199400901794,
+      "acutance_ratio": 1.9947262462200643,
+      "flicker": 18.083347927440297,
+      "flicker_ratio": 1.0967562713321681,
+      "flicker_ratio_reliable": true,
+      "flicker_vs_source": 1.016185862702262,
+      "frames": 4,
+      "psnr": 29.542629760584738,
+      "smooth_rmse": 5.040966272354126,
+      "source": "player",
+      "ssim": 0.8485255837440491
+    },
+    "realesrgan": {
+      "acutance": 3.1943966150283813,
+      "acutance_ratio": 0.9708598474027967,
+      "flicker": 18.872738404707476,
+      "flicker_ratio": 1.144632857014564,
+      "flicker_ratio_reliable": true,
+      "flicker_vs_source": 1.0605453168458978,
+      "frames": 4,
+      "psnr": 27.78859654501182,
+      "smooth_rmse": 5.36412513256073,
+      "source": "player",
+      "ssim": 0.8601355999708176
+    },
+    "realesrgan-general": {
+      "acutance": 3.4365915060043335,
+      "acutance_ratio": 1.0444691461944438,
+      "flicker": 20.170396197925914,
+      "flicker_ratio": 1.2233358896867248,
+      "flicker_ratio_reliable": true,
+      "flicker_vs_source": 1.1334666314932265,
+      "frames": 4,
+      "psnr": 26.349622973005264,
+      "smooth_rmse": 5.387491345405579,
+      "source": "player",
+      "ssim": 0.8502759337425232
+    },
+    "rt4ksr": {
+      "acutance": 1.8669312000274658,
+      "acutance_ratio": 0.5674087342326093,
+      "flicker": 18.097102598710492,
+      "flicker_ratio": 1.0975904930723144,
+      "flicker_ratio_reliable": true,
+      "flicker_vs_source": 1.0169588004650576,
+      "frames": 4,
+      "psnr": 29.897332795786365,
+      "smooth_rmse": 4.960146546363831,
+      "source": "rendered file",
+      "ssim": 0.8612467795610428
+    }
+  },
+  "reference": "test-media/liveaction/tt_1080p_ref.mp4",
+  "reference_acutance": 3.290275752544403,
+  "scale": 4,
+  "seq": [
+    100,
+    101,
+    102,
+    103,
+    104,
+    105,
+    106,
+    107,
+    108,
+    109,
+    110,
+    111
+  ],
+  "source": "test-media/liveaction/tt_270p_c28.mp4",
+  "source_flicker": 17.795315395702016,
+  "stills": [
+    45,
+    105,
+    165,
+    225
+  ]
+}

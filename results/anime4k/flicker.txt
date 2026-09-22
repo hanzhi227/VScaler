@@ -1,0 +1,5 @@
+input_pair_metric=9.738196  (12 frames)
+off          frames=12 out_metric=9.757899 ratio=1.0020
+cnnM         frames=12 out_metric=9.759943 ratio=1.0022
+modeA        frames=12 out_metric=9.959199 ratio=1.0227
+JSON:{"input_pair_metric": 9.738195924084595, "results": [{"preset": "off", "frames": 12, "out_pair_metric": 9.757898713699495, "ratio": 1.0020232484300475}, {"preset": "cnnM", "frames": 12, "out_pair_metric": 9.759943157157513, "ratio": 1.0022331891083782}, {"preset": "modeA", "frames": 12, "out_pair_metric": 9.959198947482639, "ratio": 1.0226944523524586}]}

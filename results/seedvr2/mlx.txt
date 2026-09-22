@@ -1,0 +1,29 @@
+SeedVR2 through mlx-gen (MLX, 4-bit) on Apple M5 Pro
+macOS 26.6.2, 26 GB unified memory
+measured 2026-09-15 23:09
+model: AbstractFramework/seedvr2-3b-4bit
+mlx 0.31.2
+Name: mlx-gen Version: 0.37.0
+
+Peak RSS is the process's resident set (the number to hold against the
+project's 2 GB model budget). 'Peak MLX' is mlx-gen's own accounting of
+MLX-managed memory, which is larger and which it also budget-checks.
+
+=== image path: 128x128 crop, 2x (fixed load overhead) ===
+128x128 -> 256x256, 2x                     exit=0   wall=   1.28s  peakRSS= 2.87 GB
+
+=== image path: one real SD frame, 2x ===
+480x270 -> 960x540, 2x                     exit=0   wall=   6.75s  peakRSS= 2.82 GB
+  (the 2x2 difference between these two rows is the marginal cost of a
+   real frame: the small image mostly measures model load.)
+
+=== video path, 3 frames of the same SD clip ===
+video 1x (restoration, source size)        exit=0   wall=   6.73s  peakRSS= 2.75 GB
+      SeedVR2 streaming plan: chunk_size=5 chunk_overlap=0 safe_chunk_frame_limit=3 chunk_pixel_volume=614400
+      Peak MLX memory: 8.57 GB; Peak RSS: 2.75 GB; Physical footprint: 2.89 GB
+video 1x with a 1 GB MLX cache             exit=1   wall=   5.94s  peakRSS= 2.90 GB
+      SeedVR2 streaming plan: chunk_size=5 chunk_overlap=0 safe_chunk_frame_limit=3 chunk_pixel_volume=614400
+      Peak MLX memory: 8.57 GB; Peak RSS: 2.90 GB; Physical footprint: 2.91 GB
+      RuntimeError: SeedVR2 video restore chunk exceeded the supported host-safe MLX peak memory budget. peak=5.84 GB, budget=5.79 GB.
+video 2x (upscaling)                       exit=2   wall=   0.28s  peakRSS= 0.09 GB
+      mflux-upscale-seedvr2: error: SeedVR2 safe video mode only supports source-size restoration or smaller output. Use 1x or override with --force-unsafe-video-memory.

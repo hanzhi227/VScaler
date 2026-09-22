@@ -1,0 +1,47 @@
+{
+ "clip": "test-media/yt/mhw_ascendance_480p.mp4",
+ "source": "https://www.youtube.com/watch?v=Y8FOt75mbng",
+ "title": "Monster Hunter Wilds: Ascendance - Long Sword | Boosted Action Breakdown",
+ "uploader": "Monster Hunter (official channel)",
+ "downloaded_with": "yt-dlp 2026.08.19, format 135+140 (854x480 h264 30fps + aac 44.1k stereo), merged to mp4",
+ "source_geometry": "854x480, 29.97 fps, h264, 65.1 s, 1949 frames",
+ "note": "Third-party copyrighted promotional video, downloaded for local testing only.",
+ "playback_measured": {
+  "metalfx 2x": "1708x960, 597 frames / 19.83 s playback, 1.000x realtime",
+  "cnn 2x": "1708x960, 596 frames, 1.013x",
+  "metalfx 4x": "3416x1920, 596 frames, 1.001x",
+  "cnn 4x": "3416x1920, 595 frames, 0.998x"
+ },
+ "realbasicvsr_export": {
+  "padding": "854 -> 864 (not a multiple of 32), so 864x480 into the model",
+  "output": "3416x1920, audio carried through (aac, 2ch)",
+  "speed": "~1.0 s/frame (0.97-1.14), so the 65 s clip is ~32 minutes",
+  "alignment": "export frame N == source frame N (frame 45 matches at 30.8 dB, next best 17.0); best spatial shift (0,0) for every mode"
+ },
+ "grids": {
+  "grid_rpt_titlecard.png": "frame 45, RP-T title card: source / bypass / cnn / metalfx / realbasicvsr",
+  "grid_forest_detail.png": "frame 45, forest detail"
+ },
+ "realesrgan_check": {
+  "date": "2026-09-16",
+  "why": "A user reported that the shipped Real-ESRGAN mode 'looks bad on real video that's not anime'. This clip is the right material to check that on: genuine natively-degraded 480p, not a synthetic downscale.",
+  "modes_compared": "source(nearest 4x) / bypass / Anime4K CNN / MetalFX Spatial / Real-ESRGAN animevideov3 / Real-ESRGAN general-x4v3, at frame 45, output 3416x1920",
+  "finding": "animevideov3 replaces fine stochastic structure with smooth rounded blobs and expands bright highlights. Most visible on the blue particle effect and the blown specular highlight (grid_real_particles_animevideov3.png): individual sparks become balloons and the highlight loses its internal structure. general-x4v3 shows the same mechanism, slightly less pronounced. The CNN and MetalFX keep the texture.",
+  "temporal_is_not_the_cause": "40 consecutive frames with real motion: flicker 1.001x the source's own frame-to-frame change (bilinear 0.969x, general-x4v3 1.036x). animevideov3 adds no measurable temporal instability; the artifact is spatial.",
+  "tone_is_not_the_cause": "global luma mean 76.16 against the source's 75.60, saturation 39.10% against 41.15% \u2014 far too small to explain the visible difference, which is local structure, not tone.",
+  "alters_the_picture": "mean |output - source| over the 40 frames: bilinear 3.196, animevideov3 5.124, general-x4v3 5.482. It is not sharpening so much as replacing.",
+  "verification": "the Metal port matches PyTorch to 59.99 dB on this model (scripts/realesrgan/verify_metal.py), and the live path matches the offline one to 53.18 dB on this frame \u2014 so this is the model's behaviour, not a port artifact.",
+  "grids": "grid_real_particles_animevideov3.png (worst-deviation crop, 2x), grid_real_text_animevideov3.png (RP-T card, 3x), grid_real_rocks_animevideov3.png (rocks+foliage, 1x)"
+ },
+ "esrgan_pair_check": {
+  "date": "2026-09-16",
+  "why": "general-x4v3 was made a live mode (--mode realesrgan-general) so it can be judged on real footage rather than on this project's scores, which come almost entirely from synthetic lanczos downscales. This is the artifact for that judgment.",
+  "how": "scripts/realesrgan/pair_grid.sh -- one frame (45) through the live path in bypass/realesrgan/realesrgan-general at 4x, alongside the source nearest-upscaled 4x, cropped 1:1 at 3x.",
+  "alignment": "checked, not assumed: the dumped frame matches source frame 45 at 31.63 dB against 17.41 dB for frame 44, so the dump and the extraction are the same frame.",
+  "grids": "grid_real_highlight_esrgan_pair.png (blown specular highlight and blue effect), grid_real_foliage_esrgan_pair.png (foliage/rock texture), grid_real_rating_card_esrgan_pair.png (flat UI text) -- panels left to right: source / bilinear / AnimeVideo-v3 / General-x4v3",
+  "what_the_panels_show": "On the flat rating-card text both checkpoints resolve esrb.org more cleanly than bilinear, and they are close to each other -- the case the scores rate them on. On the specular highlight and the blue energy effect both replace structure: the highlight loses its internal detail and the blue region becomes a smooth balloon. On foliage the two differ most: general-x4v3 blows the green leaves into larger white specular areas than animevideov3 does. So on this clip general-x4v3 is not simply 'the same but worse' -- it is worse in a different way, which is what the crop pair is for.",
+  "real_time": "animevideov3 0.92x realtime and general-x4v3 0.63x at 854x480 -> 3416x1920 (the graph warms up over the first seconds), so at this size general-x4v3 drops about a third of the frames. Judge the picture, not the smoothness.",
+  "memory": "139 MB resident at 480x270 -> 1080p (animevideov3), 295/301 MB at 854x480 -> 3416x1920 -- inside the 2 GB model budget by an order of magnitude.",
+  "licence_note": "This clip is third-party promotional material kept for local testing only (test-media/yt/README.md). The grids are derived from it and carry the same restriction: do not redistribute."
+ }
+}

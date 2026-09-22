@@ -1,0 +1,38 @@
+{
+  "dims_ok": true,
+  "output_size": [
+    1708,
+    960
+  ],
+  "nan_inf_metal": "see bench.json float_min/float_max/nan_count (0/0)",
+  "nan_inf_ref": false,
+  "dark_centroid_y_input": 211.35,
+  "dark_centroid_y_bilinear_2x": 395.87,
+  "dark_centroid_y_cnn_2x": 410.6,
+  "expected_2x": 422.7,
+  "row_profile_corr_input_vs_cnn": 0.99755,
+  "row_profile_corr_input_vs_mirrored_cnn": -0.90474,
+  "bilinear_vs_cnn_centroid_delta_px": 14.74,
+  "orientation_ok": true,
+  "bright_centroid_x_input": 449.59,
+  "bright_centroid_x_cnn_2x": 894.37,
+  "h_orientation_ok": true,
+  "acutance_hatch_bilinear": 834.24,
+  "acutance_hatch_cnn": 6469.4,
+  "acutance_text_bilinear": 260.62,
+  "acutance_text_cnn": 1545.14,
+  "sharper_than_bilinear": true,
+  "ref_maxdiff_cnnX2M": 1,
+  "ref_meandiff_cnnX2M": 0.004966,
+  "ref_pct_pixels_gt1_cnnX2M": 0.0,
+  "ref_maxdiff_cnnDenoiseX2M": 1,
+  "ref_meandiff_cnnDenoiseX2M": 0.006171,
+  "ref_pct_pixels_gt1_cnnDenoiseX2M": 0.0,
+  "crops": [
+    "results/metal/crops/text_input_bilinear_cnn.png",
+    "results/metal/crops/hatch_input_bilinear_cnn.png"
+  ],
+  "flat_region_src_mean": 200.0,
+  "flat_region_cnn_mean": 200.0,
+  "flat_region_bilinear_mean": 200.0
+}

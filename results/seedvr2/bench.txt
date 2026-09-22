@@ -1,0 +1,300 @@
+SeedVR2 throughput on Apple M5 Pro
+macOS 26.6.2, 26 GB unified memory, 15 CPUs
+measured 2026-09-15 23:11
+
+Method: scripts/seedvr2/bench.py builds the NaDiT block stack at the
+dimensions in the shipped Comfy-Org safetensors headers and times real
+forward passes through it with random weights (a forward pass does not
+depend on weight values). This is a FLOOR on the real thing: the 3D causal
+VAE's encode and decode are not included.
+
+MPS allocation is capped at 85% of the GPU working set (macOS reports
+~17.7 GB of it on this 26 GB machine) so an oversized case fails in seconds
+instead of swapping the whole system.
+
+=== reference: what this GPU does on plain dense matmul ===
+  dense matmul 4096^3 on mps float16     25.0 TFLOP/s
+  dense matmul 4096^3 on mps float32      5.4 TFLOP/s
+
+############ 3B: scaling with clip length, at a fixed 640x480 output ############
+
+=== 3b  output 640x480  1 frames per pass ===
+SeedVR2 3B: dim=2560  32 blocks (10 dual-stream + 22 vid-only)  mlp=6912  heads=20x128  patch=(1, 2, 2)
+  3.3908 B params modelled, 3.3921 B shipped  (+ 250.7 M VAE)
+output 640x480, 1 frames -> latent grid 1x30x40 = 1,200 tokens, window attention, float16
+
+  model built here: 3.3445 B params   (released: 3.3915 B)
+  one forward pass over 1 frames:      668.7 ms
+  per frame:                            668.7 ms     1.50 fps   0.0498x realtime @30fps
+  peak MPS allocation:                   7.63 GB
+
+  arithmetic context (the timing above is measured, this is not a projection):
+    linear           8.09 TFLOP/frame
+    attention        0.00 TFLOP/frame  (window)
+    sum              8.09 TFLOP/frame ->    242.7 TFLOP/s needed to hold 30 fps
+    achieved        12.10 TFLOP/s of the above, measured
+
+=== 3b  output 640x480  4 frames per pass ===
+SeedVR2 3B: dim=2560  32 blocks (10 dual-stream + 22 vid-only)  mlp=6912  heads=20x128  patch=(1, 2, 2)
+  3.3908 B params modelled, 3.3921 B shipped  (+ 250.7 M VAE)
+output 640x480, 4 frames -> latent grid 1x30x40 = 1,200 tokens, window attention, float16
+
+  model built here: 3.3445 B params   (released: 3.3915 B)
+  one forward pass over 4 frames:      664.4 ms
+  per frame:                            166.1 ms     6.02 fps   0.2007x realtime @30fps
+  peak MPS allocation:                   7.63 GB
+
+  arithmetic context (the timing above is measured, this is not a projection):
+    linear           2.02 TFLOP/frame
+    attention        0.00 TFLOP/frame  (window)
+    sum              2.02 TFLOP/frame ->     60.7 TFLOP/s needed to hold 30 fps
+    achieved         3.04 TFLOP/s of the above, measured
+
+=== 3b  output 640x480  9 frames per pass ===
+SeedVR2 3B: dim=2560  32 blocks (10 dual-stream + 22 vid-only)  mlp=6912  heads=20x128  patch=(1, 2, 2)
+  3.3908 B params modelled, 3.3921 B shipped  (+ 250.7 M VAE)
+output 640x480, 9 frames -> latent grid 2x30x40 = 2,400 tokens, window attention, float16
+
+  model built here: 3.3445 B params   (released: 3.3915 B)
+  one forward pass over 9 frames:     1127.2 ms
+  per frame:                            125.2 ms     7.98 fps   0.2662x realtime @30fps
+  peak MPS allocation:                   7.81 GB
+
+  arithmetic context (the timing above is measured, this is not a projection):
+    linear           1.79 TFLOP/frame
+    attention        0.00 TFLOP/frame  (window)
+    sum              1.79 TFLOP/frame ->     53.7 TFLOP/s needed to hold 30 fps
+    achieved         1.59 TFLOP/s of the above, measured
+
+=== 3b  output 640x480  25 frames per pass ===
+SeedVR2 3B: dim=2560  32 blocks (10 dual-stream + 22 vid-only)  mlp=6912  heads=20x128  patch=(1, 2, 2)
+  3.3908 B params modelled, 3.3921 B shipped  (+ 250.7 M VAE)
+output 640x480, 25 frames -> latent grid 6x30x40 = 7,200 tokens, window attention, float16
+
+  model built here: 3.3445 B params   (released: 3.3915 B)
+  one forward pass over 25 frames:     3062.9 ms
+  per frame:                            122.5 ms     8.16 fps   0.2721x realtime @30fps
+  peak MPS allocation:                  12.87 GB
+
+  arithmetic context (the timing above is measured, this is not a projection):
+    linear           1.92 TFLOP/frame
+    attention        0.00 TFLOP/frame  (window)
+    sum              1.93 TFLOP/frame ->     57.8 TFLOP/s needed to hold 30 fps
+    achieved         0.63 TFLOP/s of the above, measured
+
+=== 3b  output 640x480  49 frames per pass ===
+SeedVR2 3B: dim=2560  32 blocks (10 dual-stream + 22 vid-only)  mlp=6912  heads=20x128  patch=(1, 2, 2)
+  3.3908 B params modelled, 3.3921 B shipped  (+ 250.7 M VAE)
+output 640x480, 49 frames -> latent grid 12x30x40 = 14,400 tokens, window attention, float16
+
+ran out of memory before producing a timing:
+  MPS backend out of memory (MPS allocated: 8.01 GB, other allocations: 56.72 MB, max allowed: 15.10 GB). Tried to allocate 7.79 GB on private pool. Use PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 to disable upper limit for memory allocations (may cause system failure).
+  reduce --res or --frames. Per-frame cost is what matters and it does not fall.
+
+############ 3B: scaling with output resolution, 9 frames ############
+
+=== 3b  output 640x480  9 frames per pass ===
+SeedVR2 3B: dim=2560  32 blocks (10 dual-stream + 22 vid-only)  mlp=6912  heads=20x128  patch=(1, 2, 2)
+  3.3908 B params modelled, 3.3921 B shipped  (+ 250.7 M VAE)
+output 640x480, 9 frames -> latent grid 2x30x40 = 2,400 tokens, window attention, float16
+
+  model built here: 3.3445 B params   (released: 3.3915 B)
+  one forward pass over 9 frames:      983.4 ms
+  per frame:                            109.3 ms     9.15 fps   0.3051x realtime @30fps
+  peak MPS allocation:                   7.81 GB
+
+  arithmetic context (the timing above is measured, this is not a projection):
+    linear           1.79 TFLOP/frame
+    attention        0.00 TFLOP/frame  (window)
+    sum              1.79 TFLOP/frame ->     53.7 TFLOP/s needed to hold 30 fps
+    achieved         1.82 TFLOP/s of the above, measured
+
+=== 3b  output 1280x960  9 frames per pass ===
+SeedVR2 3B: dim=2560  32 blocks (10 dual-stream + 22 vid-only)  mlp=6912  heads=20x128  patch=(1, 2, 2)
+  3.3908 B params modelled, 3.3921 B shipped  (+ 250.7 M VAE)
+output 1280x960, 9 frames -> latent grid 2x60x80 = 9,600 tokens, window attention, float16
+
+  model built here: 3.3445 B params   (released: 3.3915 B)
+  one forward pass over 9 frames:     5437.6 ms
+  per frame:                            604.2 ms     1.66 fps   0.0552x realtime @30fps
+  peak MPS allocation:                  12.44 GB
+
+  arithmetic context (the timing above is measured, this is not a projection):
+    linear           7.12 TFLOP/frame
+    attention        0.01 TFLOP/frame  (window)
+    sum              7.12 TFLOP/frame ->    213.7 TFLOP/s needed to hold 30 fps
+    achieved         1.31 TFLOP/s of the above, measured
+
+=== 3b  output 1920x1080  9 frames per pass ===
+SeedVR2 3B: dim=2560  32 blocks (10 dual-stream + 22 vid-only)  mlp=6912  heads=20x128  patch=(1, 2, 2)
+  3.3908 B params modelled, 3.3921 B shipped  (+ 250.7 M VAE)
+output 1920x1080, 9 frames -> latent grid 2x67x120 = 16,080 tokens, window attention, float16
+
+NOTE  1920x1080 is off SeedVR2's patch lattice (each side must be a multiple of 16:
+      VAE /8 then patch /2). Padding the latent grid to 240x136, i.e. an effective
+      output of 3840x2176; the token count rises by 0.7%.
+
+ran out of memory before producing a timing:
+  MPS backend out of memory (MPS allocated: 9.01 GB, other allocations: 120.72 MB, max allowed: 15.10 GB). Tried to allocate 9.99 GB on private pool. Use PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 to disable upper limit for memory allocations (may cause system failure).
+  reduce --res or --frames. Per-frame cost is what matters and it does not fall.
+
+=== 3b  output 3840x2160  9 frames per pass ===
+SeedVR2 3B: dim=2560  32 blocks (10 dual-stream + 22 vid-only)  mlp=6912  heads=20x128  patch=(1, 2, 2)
+  3.3908 B params modelled, 3.3921 B shipped  (+ 250.7 M VAE)
+output 3840x2160, 9 frames -> latent grid 2x135x240 = 64,800 tokens, window attention, float16
+
+Traceback (most recent call last):
+  File "scripts/seedvr2/bench.py", line 398, in <module>
+    main()
+  File "scripts/seedvr2/bench.py", line 357, in main
+    model(latents, txt)
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "scripts/seedvr2/bench.py", line 245, in forward
+    vid, txt = blk(vid, txt, shape)
+               ^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "scripts/seedvr2/bench.py", line 204, in forward
+    y = F.scaled_dot_product_attention(q, k, v).transpose(1, 2)[:, :txt.shape[1]]
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Invalid buffer size: 156.71 GB
+
+############ 3B: upstream's own example shape, 100x720x1280 ############
+
+=== 3b  output 1280x720  100 frames per pass ===
+SeedVR2 3B: dim=2560  32 blocks (10 dual-stream + 22 vid-only)  mlp=6912  heads=20x128  patch=(1, 2, 2)
+  3.3908 B params modelled, 3.3921 B shipped  (+ 250.7 M VAE)
+output 1280x720, 100 frames -> latent grid 25x45x80 = 90,000 tokens, window attention, float16
+
+ran out of memory before producing a timing:
+  MPS backend out of memory (MPS allocated: 14.56 GB, other allocations: 366.72 MB, max allowed: 15.10 GB). Tried to allocate 498.34 MB on private pool. Use PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 to disable upper limit for memory allocations (may cause system failure).
+  reduce --res or --frames. Per-frame cost is what matters and it does not fall.
+
+############ 7B ############
+
+=== 7b  output 640x480  4 frames per pass ===
+SeedVR2 7B: dim=3072  36 blocks (36 dual-stream + 0 vid-only)  mlp=8192  heads=24x128  patch=(1, 2, 2)
+  8.2377 B params modelled, 8.2402 B shipped  (+ 250.7 M VAE)
+output 640x480, 4 frames -> latent grid 1x30x40 = 1,200 tokens, window attention, float16
+
+Traceback (most recent call last):
+  File "scripts/seedvr2/bench.py", line 398, in <module>
+    main()
+  File "scripts/seedvr2/bench.py", line 318, in main
+    model = NaDiT(a.variant, attention=a.attention).to(device, dtype=dtype)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1343, in to
+    return self._apply(convert)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 903, in _apply
+    module._apply(fn)
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 903, in _apply
+    module._apply(fn)
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 903, in _apply
+    module._apply(fn)
+  [Previous line repeated 1 more time]
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 930, in _apply
+    param_applied = fn(param)
+                    ^^^^^^^^^
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1329, in convert
+    return t.to(
+           ^^^^^
+RuntimeError: MPS backend out of memory (MPS allocated: 16.01 GB, other allocations: 448.00 KB, max allowed: 15.10 GB). Tried to allocate 6.00 KB on private pool. Use PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 to disable upper limit for memory allocations (may cause system failure).
+
+=== 7b  output 640x480  9 frames per pass ===
+SeedVR2 7B: dim=3072  36 blocks (36 dual-stream + 0 vid-only)  mlp=8192  heads=24x128  patch=(1, 2, 2)
+  8.2377 B params modelled, 8.2402 B shipped  (+ 250.7 M VAE)
+output 640x480, 9 frames -> latent grid 2x30x40 = 2,400 tokens, window attention, float16
+
+Traceback (most recent call last):
+  File "scripts/seedvr2/bench.py", line 398, in <module>
+    main()
+  File "scripts/seedvr2/bench.py", line 318, in main
+    model = NaDiT(a.variant, attention=a.attention).to(device, dtype=dtype)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1343, in to
+    return self._apply(convert)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 903, in _apply
+    module._apply(fn)
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 903, in _apply
+    module._apply(fn)
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 903, in _apply
+    module._apply(fn)
+  [Previous line repeated 1 more time]
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 930, in _apply
+    param_applied = fn(param)
+                    ^^^^^^^^^
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1329, in convert
+    return t.to(
+           ^^^^^
+RuntimeError: MPS backend out of memory (MPS allocated: 16.01 GB, other allocations: 448.00 KB, max allowed: 15.10 GB). Tried to allocate 6.00 KB on private pool. Use PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 to disable upper limit for memory allocations (may cause system failure).
+
+=== 7b  output 1280x960  4 frames per pass ===
+SeedVR2 7B: dim=3072  36 blocks (36 dual-stream + 0 vid-only)  mlp=8192  heads=24x128  patch=(1, 2, 2)
+  8.2377 B params modelled, 8.2402 B shipped  (+ 250.7 M VAE)
+output 1280x960, 4 frames -> latent grid 1x60x80 = 4,800 tokens, window attention, float16
+
+Traceback (most recent call last):
+  File "scripts/seedvr2/bench.py", line 398, in <module>
+    main()
+  File "scripts/seedvr2/bench.py", line 318, in main
+    model = NaDiT(a.variant, attention=a.attention).to(device, dtype=dtype)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1343, in to
+    return self._apply(convert)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 903, in _apply
+    module._apply(fn)
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 903, in _apply
+    module._apply(fn)
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 903, in _apply
+    module._apply(fn)
+  [Previous line repeated 1 more time]
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 930, in _apply
+    param_applied = fn(param)
+                    ^^^^^^^^^
+  File "/opt/homebrew/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1329, in convert
+    return t.to(
+           ^^^^^
+RuntimeError: MPS backend out of memory (MPS allocated: 16.01 GB, other allocations: 448.00 KB, max allowed: 15.10 GB). Tried to allocate 6.00 KB on private pool. Use PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 to disable upper limit for memory allocations (may cause system failure).
+
+############ the other bracket: GLOBAL attention instead of the (4,3,3) window ############
+Global attention is quadratic in the token count, which is why upstream
+windows every layer. At small token counts it is actually cheaper here --
+the window fold has real padding and reshape overhead -- and at the sizes
+that matter it does not fit at all. Both are shown.
+
+=== 3b  output 640x480  9 frames per pass ===
+SeedVR2 3B: dim=2560  32 blocks (10 dual-stream + 22 vid-only)  mlp=6912  heads=20x128  patch=(1, 2, 2)
+  3.3908 B params modelled, 3.3921 B shipped  (+ 250.7 M VAE)
+output 640x480, 9 frames -> latent grid 2x30x40 = 2,400 tokens, full attention, float16
+
+  model built here: 3.3445 B params   (released: 3.3915 B)
+  one forward pass over 9 frames:      920.0 ms
+  per frame:                            102.2 ms     9.78 fps   0.3261x realtime @30fps
+  peak MPS allocation:                   8.02 GB
+
+  arithmetic context (the timing above is measured, this is not a projection):
+    linear           1.79 TFLOP/frame
+    attention        0.21 TFLOP/frame  (full)
+    sum              2.00 TFLOP/frame ->     59.9 TFLOP/s needed to hold 30 fps
+    achieved         2.17 TFLOP/s of the above, measured
+
+=== 3b  output 1280x960  9 frames per pass ===
+SeedVR2 3B: dim=2560  32 blocks (10 dual-stream + 22 vid-only)  mlp=6912  heads=20x128  patch=(1, 2, 2)
+  3.3908 B params modelled, 3.3921 B shipped  (+ 250.7 M VAE)
+output 1280x960, 9 frames -> latent grid 2x60x80 = 9,600 tokens, full attention, float16
+
+ran out of memory before producing a timing:
+  MPS backend out of memory (MPS allocated: 7.01 GB, other allocations: 6.93 GB, max allowed: 15.10 GB). Tried to allocate 3.45 GB on private pool. Use PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 to disable upper limit for memory allocations (may cause system failure).
+  reduce --res or --frames. Per-frame cost is what matters and it does not fall.

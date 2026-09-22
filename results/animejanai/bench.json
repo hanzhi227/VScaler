@@ -1,0 +1,1015 @@
+{
+  "generated": "2026-09-13T23:44:31",
+  "machine": {
+    "platform": "darwin",
+    "cpu": "Apple M5 Pro"
+  },
+  "onnxruntime": "1.23.2",
+  "available_providers": [
+    "CoreMLExecutionProvider",
+    "AzureExecutionProvider",
+    "CPUExecutionProvider"
+  ],
+  "chosen_model": {
+    "path": "third_party/AnimeJaNai/2x_AnimeJaNai_HD_V3_ModelsOnly/2x_AnimeJaNai_HD_V3_SuperUltraCompact.onnx",
+    "input_name": "input",
+    "input_dtype": "tensor(float)",
+    "input_shape": [
+      "batch_size",
+      3,
+      "height",
+      "width"
+    ],
+    "output_name": "output",
+    "output_dtype": "tensor(float)",
+    "output_shape": [
+      "batch_size",
+      3,
+      "height",
+      "width"
+    ],
+    "file_bytes": 184990,
+    "tag": "HD_V3_SuperUltraCompact"
+  },
+  "coreml_capability_chosen": {
+    "coreml_partitions": 2,
+    "graph_nodes": 23,
+    "nodes_on_coreml": 21,
+    "bound_coreml": true
+  },
+  "speed": {
+    "HD_V3_SuperUltraCompact": {
+      "role": "chosen",
+      "path": "third_party/AnimeJaNai/2x_AnimeJaNai_HD_V3_ModelsOnly/2x_AnimeJaNai_HD_V3_SuperUltraCompact.onnx",
+      "cases": {
+        "480p->960p": {
+          "coreml": {
+            "input_hw": [
+              480,
+              640
+            ],
+            "output_chw": [
+              3,
+              960,
+              1280
+            ],
+            "session_providers": [
+              "CoreMLExecutionProvider",
+              "CPUExecutionProvider"
+            ],
+            "warmup": 3,
+            "runs": 12,
+            "median_ms": 50.9798540151678,
+            "mean_ms": 51.097649411531165,
+            "min_ms": 50.47341692261398,
+            "max_ms": 52.36604192759842,
+            "stdev_ms": 0.5781186488391067,
+            "overall_ms": 51.09963892027736,
+            "ms_per_mp_out": 41.48751140557276
+          },
+          "cpu": {
+            "input_hw": [
+              480,
+              640
+            ],
+            "output_chw": [
+              3,
+              960,
+              1280
+            ],
+            "session_providers": [
+              "CPUExecutionProvider"
+            ],
+            "warmup": 3,
+            "runs": 12,
+            "median_ms": 70.14062500093132,
+            "mean_ms": 70.15130210008162,
+            "min_ms": 69.09341702703387,
+            "max_ms": 71.58237509429455,
+            "stdev_ms": 0.7179280709487705,
+            "overall_ms": 70.15275000594556,
+            "ms_per_mp_out": 57.08058675206
+          }
+        },
+        "1080p->2160p": {
+          "coreml": {
+            "input_hw": [
+              1080,
+              1920
+            ],
+            "output_chw": [
+              3,
+              2160,
+              3840
+            ],
+            "session_providers": [
+              "CoreMLExecutionProvider",
+              "CPUExecutionProvider"
+            ],
+            "warmup": 3,
+            "runs": 12,
+            "median_ms": 350.86499992758036,
+            "mean_ms": 356.9749375747051,
+            "min_ms": 345.7307090284303,
+            "max_ms": 426.0900840163231,
+            "stdev_ms": 21.017873816790555,
+            "overall_ms": 356.97757291685167,
+            "ms_per_mp_out": 42.30143228293552
+          },
+          "cpu": {
+            "input_hw": [
+              1080,
+              1920
+            ],
+            "output_chw": [
+              3,
+              2160,
+              3840
+            ],
+            "session_providers": [
+              "CPUExecutionProvider"
+            ],
+            "warmup": 3,
+            "runs": 12,
+            "median_ms": 442.8515834151767,
+            "mean_ms": 443.21511463688995,
+            "min_ms": 435.0191249977797,
+            "max_ms": 449.84333391766995,
+            "stdev_ms": 4.132328870012934,
+            "overall_ms": 443.2166145804028,
+            "ms_per_mp_out": 53.39163573196093
+          }
+        }
+      },
+      "dtype": "tensor(float)"
+    },
+    "HD_V3Sharp1_SuperUltraCompact": {
+      "role": "alternative",
+      "path": "third_party/AnimeJaNai/2x_AnimeJaNai_HD_V3_ModelsOnly/2x_AnimeJaNai_HD_V3Sharp1_SuperUltraCompact.onnx",
+      "cases": {
+        "480p->960p": {
+          "coreml": {
+            "input_hw": [
+              480,
+              640
+            ],
+            "output_chw": [
+              3,
+              960,
+              1280
+            ],
+            "session_providers": [
+              "CoreMLExecutionProvider",
+              "CPUExecutionProvider"
+            ],
+            "warmup": 3,
+            "runs": 12,
+            "median_ms": 51.17047904059291,
+            "mean_ms": 51.47763899488685,
+            "min_ms": 50.41304195765406,
+            "max_ms": 56.144709000363946,
+            "stdev_ms": 1.4534575645857362,
+            "overall_ms": 51.47895482756818,
+            "ms_per_mp_out": 41.64264244839918
+          },
+          "cpu": {
+            "input_hw": [
+              480,
+              640
+            ],
+            "output_chw": [
+              3,
+              960,
+              1280
+            ],
+            "session_providers": [
+              "CPUExecutionProvider"
+            ],
+            "warmup": 3,
+            "runs": 12,
+            "median_ms": 69.56789596006274,
+            "mean_ms": 69.80709375541967,
+            "min_ms": 68.7067499384284,
+            "max_ms": 71.33875007275492,
+            "stdev_ms": 0.8254916963502927,
+            "overall_ms": 69.8085694166366,
+            "ms_per_mp_out": 56.614498665415645
+          }
+        },
+        "1080p->2160p": {
+          "coreml": {
+            "input_hw": [
+              1080,
+              1920
+            ],
+            "output_chw": [
+              3,
+              2160,
+              3840
+            ],
+            "session_providers": [
+              "CoreMLExecutionProvider",
+              "CPUExecutionProvider"
+            ],
+            "warmup": 3,
+            "runs": 12,
+            "median_ms": 352.5876044877805,
+            "mean_ms": 359.6832294133492,
+            "min_ms": 348.54525001719594,
+            "max_ms": 426.5719590475783,
+            "stdev_ms": 20.458648303319034,
+            "overall_ms": 359.6871735838552,
+            "ms_per_mp_out": 42.50911512439483
+          },
+          "cpu": {
+            "input_hw": [
+              1080,
+              1920
+            ],
+            "output_chw": [
+              3,
+              2160,
+              3840
+            ],
+            "session_providers": [
+              "CPUExecutionProvider"
+            ],
+            "warmup": 3,
+            "runs": 12,
+            "median_ms": 441.49677106179297,
+            "mean_ms": 445.2792361068229,
+            "min_ms": 433.6922080256045,
+            "max_ms": 480.7964169885963,
+            "stdev_ms": 12.045331028542883,
+            "overall_ms": 445.28080557938665,
+            "ms_per_mp_out": 53.2282951222262
+          }
+        }
+      },
+      "dtype": "tensor(float)"
+    },
+    "V2_SuperUltraCompact_100k": {
+      "role": "alternative",
+      "path": "third_party/AnimeJaNai/2x_AnimeJaNai_V2_SuperUltraCompact_100k.onnx",
+      "cases": {
+        "480p->960p": {
+          "coreml": {
+            "input_hw": [
+              480,
+              640
+            ],
+            "output_chw": [
+              3,
+              960,
+              1280
+            ],
+            "session_providers": [
+              "CoreMLExecutionProvider",
+              "CPUExecutionProvider"
+            ],
+            "warmup": 3,
+            "runs": 12,
+            "median_ms": 75.68416645517573,
+            "mean_ms": 76.04619767516851,
+            "min_ms": 74.90779191721231,
+            "max_ms": 80.7220001006499,
+            "stdev_ms": 1.512639294929952,
+            "overall_ms": 76.047857660645,
+            "ms_per_mp_out": 61.591932336568796
+          },
+          "cpu": {
+            "input_hw": [
+              480,
+              640
+            ],
+            "output_chw": [
+              3,
+              960,
+              1280
+            ],
+            "session_providers": [
+              "CPUExecutionProvider"
+            ],
+            "warmup": 3,
+            "runs": 12,
+            "median_ms": 76.75935403676704,
+            "mean_ms": 77.17752090926903,
+            "min_ms": 76.16974995471537,
+            "max_ms": 78.5385420313105,
+            "stdev_ms": 0.831891294125454,
+            "overall_ms": 77.17909725033678,
+            "ms_per_mp_out": 62.46692223044193
+          }
+        },
+        "1080p->2160p": {
+          "coreml": {
+            "input_hw": [
+              1080,
+              1920
+            ],
+            "output_chw": [
+              3,
+              2160,
+              3840
+            ],
+            "session_providers": [
+              "CoreMLExecutionProvider",
+              "CPUExecutionProvider"
+            ],
+            "warmup": 3,
+            "runs": 12,
+            "median_ms": 522.9168749647215,
+            "mean_ms": 523.0359619211716,
+            "min_ms": 516.5230419952422,
+            "max_ms": 531.1841670190915,
+            "stdev_ms": 3.9406117725977183,
+            "overall_ms": 523.0376909215314,
+            "ms_per_mp_out": 63.04456922317727
+          },
+          "cpu": {
+            "input_hw": [
+              1080,
+              1920
+            ],
+            "output_chw": [
+              3,
+              2160,
+              3840
+            ],
+            "session_providers": [
+              "CPUExecutionProvider"
+            ],
+            "warmup": 3,
+            "runs": 12,
+            "median_ms": 494.1500414861366,
+            "mean_ms": 494.6676145870394,
+            "min_ms": 489.4511670572683,
+            "max_ms": 500.9536249563098,
+            "stdev_ms": 3.1998026900680294,
+            "overall_ms": 494.6692534140311,
+            "ms_per_mp_out": 59.576345665284606
+          }
+        }
+      },
+      "dtype": "tensor(float16)"
+    },
+    "HD_V3.1_Performance_SPANF3_b5f48_unshuffle_fp16": {
+      "role": "alternative",
+      "path": "third_party/AnimeJaNai/3.6.0-onnx/mpv-upscale-2x_animejanai-v3.6.0/animejanai/onnx/2x_AnimeJaNai_HD_V3.1_Performance_SPANF3_b5f48_unshuffle_fp16.onnx",
+      "cases": {
+        "480p->960p": {
+          "coreml": {
+            "input_hw": [
+              480,
+              640
+            ],
+            "output_chw": [
+              3,
+              960,
+              1280
+            ],
+            "session_providers": [
+              "CoreMLExecutionProvider",
+              "CPUExecutionProvider"
+            ],
+            "warmup": 3,
+            "runs": 12,
+            "median_ms": 125.73502049781382,
+            "mean_ms": 126.65275691930826,
+            "min_ms": 123.29924991354346,
+            "max_ms": 140.2646250789985,
+            "stdev_ms": 4.191886049914507,
+            "overall_ms": 126.65441316009189,
+            "ms_per_mp_out": 102.32342162908027
+          },
+          "cpu": {
+            "input_hw": [
+              480,
+              640
+            ],
+            "output_chw": [
+              3,
+              960,
+              1280
+            ],
+            "session_providers": [
+              "CPUExecutionProvider"
+            ],
+            "warmup": 3,
+            "runs": 12,
+            "median_ms": 125.23656251141801,
+            "mean_ms": 125.25678816018626,
+            "min_ms": 124.16500004474074,
+            "max_ms": 126.06279097963125,
+            "stdev_ms": 0.6416643176154158,
+            "overall_ms": 125.25843058635171,
+            "ms_per_mp_out": 101.91777548129723
+          }
+        },
+        "1080p->2160p": {
+          "coreml": {
+            "input_hw": [
+              1080,
+              1920
+            ],
+            "output_chw": [
+              3,
+              2160,
+              3840
+            ],
+            "session_providers": [
+              "CoreMLExecutionProvider",
+              "CPUExecutionProvider"
+            ],
+            "warmup": 3,
+            "runs": 12,
+            "median_ms": 804.8321669921279,
+            "mean_ms": 806.7844617180526,
+            "min_ms": 792.8631249815226,
+            "max_ms": 828.3131249481812,
+            "stdev_ms": 9.557281865310726,
+            "overall_ms": 806.7861562497759,
+            "ms_per_mp_out": 97.03319914546296
+          },
+          "cpu": {
+            "input_hw": [
+              1080,
+              1920
+            ],
+            "output_chw": [
+              3,
+              2160,
+              3840
+            ],
+            "session_providers": [
+              "CPUExecutionProvider"
+            ],
+            "warmup": 3,
+            "runs": 12,
+            "median_ms": 810.2287705405615,
+            "mean_ms": 812.7685868433522,
+            "min_ms": 799.956624978222,
+            "max_ms": 833.5211249068379,
+            "stdev_ms": 9.896326924472143,
+            "overall_ms": 812.770170091729,
+            "ms_per_mp_out": 97.68383132481694
+          }
+        }
+      },
+      "dtype": "tensor(float16)"
+    },
+    "SD_V1beta34_Compact_1x3xHxW_dyn-HW_strong_fp16_op21_dynamo": {
+      "role": "alternative",
+      "path": "third_party/AnimeJaNai/3.6.0-onnx/mpv-upscale-2x_animejanai-v3.6.0/animejanai/onnx/2x_AnimeJaNai_SD_V1beta34_Compact_1x3xHxW_dyn-HW_strong_fp16_op21_dynamo.onnx",
+      "cases": {
+        "480p->960p": {
+          "coreml": {
+            "input_hw": [
+              480,
+              640
+            ],
+            "output_chw": [
+              3,
+              960,
+              1280
+            ],
+            "session_providers": [
+              "CoreMLExecutionProvider",
+              "CPUExecutionProvider"
+            ],
+            "warmup": 3,
+            "runs": 12,
+            "median_ms": 662.0410000323318,
+            "mean_ms": 665.6977118594417,
+            "min_ms": 651.2337500462309,
+            "max_ms": 698.9722079597414,
+            "stdev_ms": 14.242813422441959,
+            "overall_ms": 665.6993645786619,
+            "ms_per_mp_out": 538.770345078395
+          },
+          "cpu": {
+            "input_hw": [
+              480,
+              640
+            ],
+            "output_chw": [
+              3,
+              960,
+              1280
+            ],
+            "session_providers": [
+              "CPUExecutionProvider"
+            ],
+            "warmup": 3,
+            "runs": 12,
+            "median_ms": 704.7960835625418,
+            "mean_ms": 705.2323402507076,
+            "min_ms": 678.0469169607386,
+            "max_ms": 725.1321660587564,
+            "stdev_ms": 13.716645316104266,
+            "overall_ms": 705.2340485776464,
+            "ms_per_mp_out": 573.5645211283706
+          }
+        },
+        "1080p->2160p": {
+          "coreml": {
+            "input_hw": [
+              1080,
+              1920
+            ],
+            "output_chw": [
+              3,
+              2160,
+              3840
+            ],
+            "session_providers": [
+              "CoreMLExecutionProvider",
+              "CPUExecutionProvider"
+            ],
+            "warmup": 3,
+            "runs": 12,
+            "median_ms": 4560.436124971602,
+            "mean_ms": 4529.020489571849,
+            "min_ms": 4344.130999990739,
+            "max_ms": 4764.49116691947,
+            "stdev_ms": 108.93661566181979,
+            "overall_ms": 4529.09150000778,
+            "ms_per_mp_out": 549.8210991719235
+          },
+          "cpu": {
+            "input_hw": [
+              1080,
+              1920
+            ],
+            "output_chw": [
+              3,
+              2160,
+              3840
+            ],
+            "session_providers": [
+              "CPUExecutionProvider"
+            ],
+            "warmup": 3,
+            "runs": 12,
+            "median_ms": 4897.577125462703,
+            "mean_ms": 4983.477396065912,
+            "min_ms": 4491.780458018184,
+            "max_ms": 5704.373416956514,
+            "stdev_ms": 391.48548806509604,
+            "overall_ms": 4983.479517327699,
+            "ms_per_mp_out": 590.4679211832928
+          }
+        }
+      },
+      "dtype": "tensor(float16)"
+    },
+    "_padding_probe": {
+      "arbitrary_size_output": [
+        3,
+        960,
+        1280
+      ],
+      "pad_multiple_32_max_abs_diff": 0,
+      "padding_required": false
+    },
+    "_coreml_compute_units": {
+      "ane_idle_power_state": 0,
+      "configs": {
+        "ALL": {
+          "480p->960p": {
+            "median_ms": 57.23083298653364,
+            "min_ms": 55.023750057443976,
+            "stdev_ms": 4.150864417430728
+          }
+        },
+        "CPUAndNeuralEngine": {
+          "480p->960p": {
+            "median_ms": 56.654667016118765,
+            "min_ms": 54.492791066877544,
+            "stdev_ms": 3.2648878324511332
+          }
+        },
+        "CPUAndGPU": {
+          "480p->960p": {
+            "median_ms": 56.882124976255,
+            "min_ms": 53.33920905832201,
+            "stdev_ms": 2.5156306659100696
+          }
+        },
+        "CPUOnly": {
+          "480p->960p": {
+            "median_ms": 52.598374895751476,
+            "min_ms": 51.96687497664243,
+            "stdev_ms": 3.3531974866451293
+          }
+        },
+        "ORT_CPUExecutionProvider": {
+          "480p->960p": {
+            "median_ms": 78.4236250910908,
+            "min_ms": 76.15095807705075,
+            "stdev_ms": 2.3639206251528795
+          }
+        }
+      },
+      "ane_power_state_during": {
+        "ALL": [
+          1
+        ],
+        "CPUAndNeuralEngine": [
+          1
+        ],
+        "CPUOnly": [
+          0
+        ]
+      }
+    }
+  },
+  "render": {
+    "model_tag": "HD_V3_SuperUltraCompact",
+    "dir": "results/animejanai/HD_V3_SuperUltraCompact",
+    "provider_used": [
+      "CoreMLExecutionProvider",
+      "CPUExecutionProvider"
+    ],
+    "frames": [
+      {
+        "frame": "bbb_t5_src1080.png",
+        "src": "test-media/frames/bbb_t5_src1080.png",
+        "src_hw": [
+          1080,
+          1920
+        ],
+        "out_hw": [
+          2160,
+          3840
+        ]
+      },
+      {
+        "frame": "naruto_t300_src1080.png",
+        "src": "test-media/frames/naruto_t300_src1080.png",
+        "src_hw": [
+          1080,
+          1920
+        ],
+        "out_hw": [
+          2160,
+          3840
+        ]
+      },
+      {
+        "frame": "naruto_t300_src480.png",
+        "src": "test-media/frames/naruto_t300_src480.png",
+        "src_hw": [
+          480,
+          640
+        ],
+        "out_hw": [
+          960,
+          1280
+        ]
+      },
+      {
+        "frame": "naruto_t450_src1080.png",
+        "src": "test-media/frames/naruto_t450_src1080.png",
+        "src_hw": [
+          1080,
+          1920
+        ],
+        "out_hw": [
+          2160,
+          3840
+        ]
+      },
+      {
+        "frame": "naruto_t450_src480.png",
+        "src": "test-media/frames/naruto_t450_src480.png",
+        "src_hw": [
+          480,
+          640
+        ],
+        "out_hw": [
+          960,
+          1280
+        ]
+      },
+      {
+        "frame": "naruto_t590_compressed.png",
+        "src": "test-media/frames/naruto_t590_compressed.png",
+        "src_hw": [
+          480,
+          640
+        ],
+        "out_hw": [
+          960,
+          1280
+        ]
+      },
+      {
+        "frame": "naruto_t600_src1080.png",
+        "src": "test-media/frames/naruto_t600_src1080.png",
+        "src_hw": [
+          1080,
+          1920
+        ],
+        "out_hw": [
+          2160,
+          3840
+        ]
+      },
+      {
+        "frame": "naruto_t600_src480.png",
+        "src": "test-media/frames/naruto_t600_src480.png",
+        "src_hw": [
+          480,
+          640
+        ],
+        "out_hw": [
+          960,
+          1280
+        ]
+      },
+      {
+        "frame": "naruto_t900_src1080.png",
+        "src": "test-media/frames/naruto_t900_src1080.png",
+        "src_hw": [
+          1080,
+          1920
+        ],
+        "out_hw": [
+          2160,
+          3840
+        ]
+      },
+      {
+        "frame": "naruto_t900_src480.png",
+        "src": "test-media/frames/naruto_t900_src480.png",
+        "src_hw": [
+          480,
+          640
+        ],
+        "out_hw": [
+          960,
+          1280
+        ]
+      },
+      {
+        "frame": "synth_t5_src1080.png",
+        "src": "test-media/frames/synth_t5_src1080.png",
+        "src_hw": [
+          1080,
+          1920
+        ],
+        "out_hw": [
+          2160,
+          3840
+        ]
+      },
+      {
+        "frame": "f01.png",
+        "src": "test-media/frames/seq_action/f01.png",
+        "src_hw": [
+          480,
+          640
+        ],
+        "out_hw": [
+          960,
+          1280
+        ]
+      },
+      {
+        "frame": "f02.png",
+        "src": "test-media/frames/seq_action/f02.png",
+        "src_hw": [
+          480,
+          640
+        ],
+        "out_hw": [
+          960,
+          1280
+        ]
+      },
+      {
+        "frame": "f03.png",
+        "src": "test-media/frames/seq_action/f03.png",
+        "src_hw": [
+          480,
+          640
+        ],
+        "out_hw": [
+          960,
+          1280
+        ]
+      },
+      {
+        "frame": "f04.png",
+        "src": "test-media/frames/seq_action/f04.png",
+        "src_hw": [
+          480,
+          640
+        ],
+        "out_hw": [
+          960,
+          1280
+        ]
+      },
+      {
+        "frame": "f05.png",
+        "src": "test-media/frames/seq_action/f05.png",
+        "src_hw": [
+          480,
+          640
+        ],
+        "out_hw": [
+          960,
+          1280
+        ]
+      },
+      {
+        "frame": "f06.png",
+        "src": "test-media/frames/seq_action/f06.png",
+        "src_hw": [
+          480,
+          640
+        ],
+        "out_hw": [
+          960,
+          1280
+        ]
+      },
+      {
+        "frame": "f07.png",
+        "src": "test-media/frames/seq_action/f07.png",
+        "src_hw": [
+          480,
+          640
+        ],
+        "out_hw": [
+          960,
+          1280
+        ]
+      },
+      {
+        "frame": "f08.png",
+        "src": "test-media/frames/seq_action/f08.png",
+        "src_hw": [
+          480,
+          640
+        ],
+        "out_hw": [
+          960,
+          1280
+        ]
+      },
+      {
+        "frame": "f09.png",
+        "src": "test-media/frames/seq_action/f09.png",
+        "src_hw": [
+          480,
+          640
+        ],
+        "out_hw": [
+          960,
+          1280
+        ]
+      },
+      {
+        "frame": "f10.png",
+        "src": "test-media/frames/seq_action/f10.png",
+        "src_hw": [
+          480,
+          640
+        ],
+        "out_hw": [
+          960,
+          1280
+        ]
+      },
+      {
+        "frame": "f11.png",
+        "src": "test-media/frames/seq_action/f11.png",
+        "src_hw": [
+          480,
+          640
+        ],
+        "out_hw": [
+          960,
+          1280
+        ]
+      },
+      {
+        "frame": "f12.png",
+        "src": "test-media/frames/seq_action/f12.png",
+        "src_hw": [
+          480,
+          640
+        ],
+        "out_hw": [
+          960,
+          1280
+        ]
+      }
+    ]
+  },
+  "flicker": {
+    "frames": [
+      "f01.png",
+      "f02.png",
+      "f03.png",
+      "f04.png",
+      "f05.png",
+      "f06.png",
+      "f07.png",
+      "f08.png",
+      "f09.png",
+      "f10.png",
+      "f11.png",
+      "f12.png"
+    ],
+    "n_frames": 12,
+    "coreml": {
+      "input_metric": 9.738196118142117,
+      "output_metric": 9.75825978883288,
+      "amplification_ratio": 1.0020603066982174,
+      "flicker_risk": false
+    },
+    "cpu": {
+      "input_metric": 9.738196118142117,
+      "output_metric": 9.7582601969215,
+      "amplification_ratio": 1.0020603486041941,
+      "flicker_risk": false
+    }
+  },
+  "video": {
+    "segment": "naruto_t580.mkv",
+    "fps_src": 29.97002997002997,
+    "frames_src": 850,
+    "size_hw": [
+      480,
+      640
+    ],
+    "decode_only_fps": 3174.5917897524932,
+    "decode_only_s": 0.26712095795664936,
+    "coreml": {
+      "frames": 848,
+      "elapsed_s": 85.06623091595247,
+      "achieved_fps": 9.96870310191414,
+      "realtime_ratio_vs_29.97": 0.3326227261232613,
+      "session_providers": [
+        "CoreMLExecutionProvider",
+        "CPUExecutionProvider"
+      ],
+      "cpu_percent": {
+        "mean": 85.5278911564626,
+        "max": 101.3,
+        "n": 147
+      },
+      "gpu_util_percent": {
+        "mean": 48.01360544217687,
+        "max": 69.0,
+        "n": 147
+      },
+      "ane_power_state": {
+        "mean": 0.06802721088435375,
+        "max": 1.0,
+        "n": 147
+      },
+      "gpu_note": "ioreg GPU util is contaminated by concurrent activity on this shared box",
+      "samples": 147
+    },
+    "cpu": {
+      "frames": 848,
+      "elapsed_s": 71.84103495802265,
+      "achieved_fps": 11.803838857492712,
+      "realtime_ratio_vs_29.97": 0.39385515040015723,
+      "session_providers": [
+        "CPUExecutionProvider"
+      ],
+      "cpu_percent": {
+        "mean": 629.6595238095238,
+        "max": 676.1,
+        "n": 126
+      },
+      "gpu_util_percent": {
+        "mean": 50.301587301587304,
+        "max": 68.0,
+        "n": 126
+      },
+      "ane_power_state": {
+        "mean": 0.0,
+        "max": 0.0,
+        "n": 126
+      },
+      "gpu_note": "ioreg GPU util is contaminated by concurrent activity on this shared box",
+      "samples": 126
+    }
+  },
+  "render_alternative_480p_tuned": {
+    "model_tag": "SD_V1beta34_Compact_480p-tuned",
+    "dir": "results/animejanai/SD_V1beta34_Compact_480p-tuned",
+    "provider_used": [
+      "CoreMLExecutionProvider",
+      "CPUExecutionProvider"
+    ]
+  },
+  "_cli_model": "third_party/AnimeJaNai/2x_AnimeJaNai_HD_V3_ModelsOnly/2x_AnimeJaNai_HD_V3_SuperUltraCompact.onnx"
+}

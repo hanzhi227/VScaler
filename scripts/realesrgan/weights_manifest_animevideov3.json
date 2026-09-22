@@ -1,0 +1,153 @@
+{
+ "name": "animevideov3",
+ "numConv": 16,
+ "scale": 4,
+ "blobByteCount": 1248352,
+ "parameters": 622000,
+ "convs": [
+  {
+   "outCh": 64,
+   "inCh": 4,
+   "hasActivation": true,
+   "weightOffset": 0,
+   "biasOffset": 4608,
+   "actOffset": 4864
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 5120,
+   "biasOffset": 78848,
+   "actOffset": 79104
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 79360,
+   "biasOffset": 153088,
+   "actOffset": 153344
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 153600,
+   "biasOffset": 227328,
+   "actOffset": 227584
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 227840,
+   "biasOffset": 301568,
+   "actOffset": 301824
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 302080,
+   "biasOffset": 375808,
+   "actOffset": 376064
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 376320,
+   "biasOffset": 450048,
+   "actOffset": 450304
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 450560,
+   "biasOffset": 524288,
+   "actOffset": 524544
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 524800,
+   "biasOffset": 598528,
+   "actOffset": 598784
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 599040,
+   "biasOffset": 672768,
+   "actOffset": 673024
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 673280,
+   "biasOffset": 747008,
+   "actOffset": 747264
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 747520,
+   "biasOffset": 821248,
+   "actOffset": 821504
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 821760,
+   "biasOffset": 895488,
+   "actOffset": 895744
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 896000,
+   "biasOffset": 969728,
+   "actOffset": 969984
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 970240,
+   "biasOffset": 1043968,
+   "actOffset": 1044224
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 1044480,
+   "biasOffset": 1118208,
+   "actOffset": 1118464
+  },
+  {
+   "outCh": 64,
+   "inCh": 64,
+   "hasActivation": true,
+   "weightOffset": 1118720,
+   "biasOffset": 1192448,
+   "actOffset": 1192704
+  },
+  {
+   "outCh": 48,
+   "inCh": 64,
+   "hasActivation": false,
+   "weightOffset": 1192960,
+   "biasOffset": 1248256,
+   "actOffset": 0
+  }
+ ]
+}

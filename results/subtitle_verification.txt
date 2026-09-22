@@ -1,0 +1,26 @@
+=== Subtitle burn-in verification ===
+
+--- (A) bitmap DVD subtitles, real episode clip 640x480 -> 1280x960 (ffmpeg overlay path) ---
+  time  bottom MAE   top MAE  verdict
+   3.0        3.15      0.43  present
+  12.0        9.17      0.21  present
+  22.0        3.17      0.10  present
+   8.0        0.10      0.10  absent (as expected)
+
+fidelity vs plain-ffmpeg reference (burned at source res, then 2x bicubic)
+  time  sub-region MAE  sharpness ours      ref   ratio
+   3.0            3.58            3.48     2.28    1.52
+  12.0            1.89            5.84     5.75    1.02
+  22.0            0.86            2.62     2.59    1.01
+
+verdict: OK
+
+--- (B) text subtitles (SRT), 1080p -> 4K (native CoreText render path) ---
+  time  bottom MAE   top MAE  verdict
+   3.0        3.37      0.51  present
+  12.0        3.27      0.26  present
+  22.0        2.19      0.23  present
+  32.0        2.41      0.24  present
+   8.0        0.19      0.22  absent (as expected)
+
+verdict: OK
