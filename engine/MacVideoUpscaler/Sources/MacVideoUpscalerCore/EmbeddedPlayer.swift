@@ -73,6 +73,11 @@ public final class EmbeddedPlayer {
 
     public var videoReady: Bool { displayLayer.isReadyForMoreMediaData }
 
+    /// True once the display layer has failed. It does not recover on its own, so
+    /// a producer waiting for it to become ready must stop waiting rather than
+    /// spin forever.
+    public var videoFailed: Bool { displayLayer.status == .failed }
+
     @discardableResult
     public func enqueueVideo(_ sample: CMSampleBuffer) -> Bool {
         guard displayLayer.isReadyForMoreMediaData else { return false }

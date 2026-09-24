@@ -1253,17 +1253,30 @@ public final class PlayerController {
 
     /// Waits until the display layer will accept a frame. Returns false when the
     /// session ended or its renderer failed and will never accept one again.
+    ///
+    /// A paused layer keeps a full queue for the whole pause and reports
+    /// not-ready the entire time. The feeder spends most of its life in this
+    /// wait, so those seconds must not count: giving up used to end the session
+    /// with "Playback stopped before the final frame" and leave playback,
+    /// seeking, and the menus disabled.
     private func waitForLayerReady(_ s: Session) -> Bool {
         var stalled = 0
         while true {
             if player.videoReady { return true }
             lock.lock()
+            let paused = pausedFlag
             let ended = isEndedLocked(s.id)
             lock.unlock()
             if ended || s.failed.value { return false }
+            if paused {
+                if parkFeederIfNeededOrEnded(s) { return false }
+                stalled = 0
+                continue
+            }
+            if player.videoFailed { return false }
             usleep(2_000)
             stalled += 1
-            // ~6 s with no accept: the renderer is wedged rather than busy.
+            // ~6 s with no accept while the clock is running: wedged, not busy.
             if stalled > 3000 { return false }
         }
     }
