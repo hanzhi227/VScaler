@@ -1,0 +1,25 @@
+Comparison wipe regression — 2026-10-14
+
+Replaced producer-time split compositing with two full-frame display layers on
+one AVSampleBufferRenderSynchronizer. The reference layer has a view-time mask;
+mask and divider geometry change with implicit animations disabled. The paired
+frame store and pixel buffer allocation budget account for both images.
+Removed source-history and whole-buffer paused-redraw paths.
+
+Release build: PASS
+scripts/check_comparison.py: PASS
+  4:3 video letterboxed in a 16:9 SwiftUI window.
+  Actual native divider drags to 25% and 75%, and slider endpoints 0% and 100%.
+  The mask reached its requested position in the same input event.
+  Both displayed full-frame hashes remained unchanged during paused dragging
+  and comparison toggles, with distinct CNN and bilinear images.
+  Playback time, produced-frame count, session and audio queue stayed unchanged.
+  Worst measured split/toggle/drag action: 0.50 ms (not a display latency measure).
+  Reference model changes, same-model comparison, paused seek, audio resume
+  and natural EOF passed.
+scripts/check_pause_resume.py: PASS
+  Two 12-second pauses, audio/video resume, paused seeking, natural EOF.
+git diff --check: PASS
+
+Model coverage: Anime4K CNN and bilinear; other model checkpoints were not
+individually exercised by this regression. No screen recording was used.

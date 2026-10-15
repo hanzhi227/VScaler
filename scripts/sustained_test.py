@@ -85,11 +85,10 @@ def main():
     eng_err = Path(f"/tmp/sustained_engine_{args.mode}.err")
     vlc_log = Path(f"/tmp/vlc_sustained_{args.mode}.log")
 
-    # Clean slate
-    sh("pkill -f 'macvideoupscale --file'")
-    sh("osascript -e 'tell application \"VLC\" to quit'")
-    time.sleep(2)
-
+    # No global cleanup here: pkill would take down every engine on the machine
+    # (including a concurrently running test) and the AppleScript quit would close
+    # the user's own VLC. Only the processes started below are stopped, in the
+    # finally block.
     print(f"[test] engine: {args.file} mode={args.mode} port={args.port}")
     eo, ee = open(eng_log, "w"), open(eng_err, "w")
     eng = subprocess.Popen(
@@ -157,8 +156,12 @@ def main():
             w.writeheader()
             w.writerows(rows)
         if vlc and vlc.poll() is None:
-            sh("osascript -e 'tell application \"VLC\" to quit'")
-            time.sleep(2)
+            vlc.terminate()
+            try:
+                vlc.wait(timeout=8)
+            except subprocess.TimeoutExpired:
+                vlc.kill()
+                vlc.wait(timeout=5)
         if eng.poll() is None:
             eng.send_signal(signal.SIGINT)
             try:

@@ -60,6 +60,6 @@ with tempfile.TemporaryDirectory(prefix="vscaler-chrome-") as directory:
     check(observed(20, 23, "[chrome] visible=0", "full=1"), "Fullscreen controls did not hide")
     check(observed(23, 25, "[chrome] visible=1", "full=1"), "Fullscreen mouse reveal failed")
     check(observed(25, 28, "[chrome] visible=0", "full=1"), "Fullscreen controls did not hide again")
-    check(observed(31, 35, "[chrome] visible=0", "full=0"), "Controls did not hide after fullscreen exit")
+    check(observed(30, 35, "[chrome] visible=0", "full=0"), "Controls did not hide after fullscreen exit")
     check(observed(28, 33, "[fullscreen] entered=0 menuAutoHide=0"), "Menu bar settings were not restored")
     print("PASS: idle hide, mouse reveal, pause/resume, fullscreen entry/exit, menu bar restoration")

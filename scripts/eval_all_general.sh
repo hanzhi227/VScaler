@@ -64,9 +64,6 @@ python3 "$RENDER" --input "$LA/tt_270p_c28.mp4"      --output "$WORK/rt4ksr_live
 python3 "$RENDER" --input "$AN/naruto_540p_c30.mp4"  --output "$WORK/rt4ksr_anime_540p.mkv"      --scale 2 --quiet
 python3 "$RENDER" --input "$AN/naruto_270p_c28.mp4"  --output "$WORK/rt4ksr_anime_270p.mkv"      --scale 4 --quiet
 
-EXTRA_270=()
-EXTRA_AN270=()
-
 score results/general/liveaction_540p_to_1080p "live action 960x540 -> 1920x1080" \
   "$LA/tt_540p_c30.mp4" "$LA/tt_1080p_ref.mp4" 2 bypass,cnn,cnnDenoise,metalfx \
   --extra-video "rt4ksr=$WORK/rt4ksr_liveaction_540p.mkv"
@@ -74,7 +71,7 @@ score results/general/liveaction_540p_to_1080p "live action 960x540 -> 1920x1080
 score results/general/liveaction_270p_to_1080p_4x "live action 480x270 -> 1920x1080 (4x)" \
   "$LA/tt_270p_c28.mp4" "$LA/tt_1080p_ref.mp4" 4 bypass,cnn,metalfx,realesrgan,realesrgan-general \
   --extra-video "rt4ksr=$WORK/rt4ksr_liveaction_270p.mkv" \
-  --extra-video "general-x4v3=$WORK/general_liveaction_270p.mkv" "${EXTRA_270[@]}"
+  --extra-video "general-x4v3=$WORK/general_liveaction_270p.mkv"
 
 score results/general/anime_540p_to_1080p "anime 960x540 -> 1920x1080" \
   "$AN/naruto_540p_c30.mp4" "$AN/naruto_1080p_ref.mp4" 2 bypass,cnn,cnnDenoise,metalfx \
@@ -83,7 +80,7 @@ score results/general/anime_540p_to_1080p "anime 960x540 -> 1920x1080" \
 score results/general/anime_270p_to_1080p_4x "anime 480x270 -> 1920x1080 (4x)" \
   "$AN/naruto_270p_c28.mp4" "$AN/naruto_1080p_ref.mp4" 4 bypass,cnn,metalfx,realesrgan,realesrgan-general \
   --extra-video "rt4ksr=$WORK/rt4ksr_anime_270p.mkv" \
-  --extra-video "general-x4v3=$WORK/general_anime_270p.mkv" "${EXTRA_AN270[@]}"
+  --extra-video "general-x4v3=$WORK/general_anime_270p.mkv"
 
 if [ -f "$METRO_SRC" ] && [ -f "$METRO_REF" ]; then
   # Only the first 170 frames are needed: stills 45/105/165 and seq 60..67.

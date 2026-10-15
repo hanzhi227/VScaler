@@ -17,7 +17,7 @@ Enhancement menu:
 | mode | what it is |
 |---|---|
 | **MetalFX Spatial** (`--mode metalfx`) | **the default**, and the general-video/live-action option: by far the cheapest, sharpens harder than the source warrants — see [docs/GENERAL-VIDEO-UPSCALING.md](GENERAL-VIDEO-UPSCALING.md) |
-| Anime4K CNN / + denoise (`cnn`, `cnnDenoise`) | the Metal port of Anime4K's CNN (2× or 4×); the better choice on animation |
+| CNN / + denoise (`cnn`, `cnnDenoise`) | Metal CNN 2× (or 4× chained); strong on animation and clean edges |
 | **Real-ESRGAN AnimeVideo-v3** (`--mode realesrgan`) | `SRVGGNetCompact`, an 18-convolution **generative** network, 4× only and SD-only; best on SD live-action detail *in the synthetic test*, worst on cel animation, and on real (non-anime) video it replaces texture rather than sharpening it — see [scripts/realesrgan/README.md](../scripts/realesrgan/README.md) |
 | Real-ESRGAN General-x4 (`--mode realesrgan-general`) | the same network at twice the depth, trained on general photographs instead of anime. **Offered so you can judge it on your own footage, not because it measured well**: it loses to AnimeVideo-v3 on every clip and column scored here, at 1.8× the time |
 | Bypass (`bypass`) | plain bilinear: scaled, not enhanced — what another player would show |
@@ -68,7 +68,7 @@ unchanged and still validated.
 embedded player (the GUI)
 ┌──────────────┐  BGRA   ┌───────────────────┐  BGRA  ┌───────────────────────┐
 │ ffmpeg decode│────────▶│ Metal 2×/4× upscale│───────▶│ CVPixelBufferPool      │
-│ (any container│ rawvideo│ Anime4K CNN        │        │ bounded FrameStore     │
+│ (any container│ rawvideo│ CNN / MetalFX /    │        │ bounded FrameStore     │
 │  VT hwaccel) │  pipe   │ (+ bilinear mode)  │        └──────────┬────────────┘
 └──────────────┘         └───────────────────┘                    │ CMSampleBuffer
                                                                    ▼
@@ -144,7 +144,7 @@ returns the status snapshot.
 | Flag | Applies to | Default | Meaning |
 |---|---|---|---|
 | `--file` | both | — | input video (MKV, MP4, anything ffmpeg reads) |
-| `--mode` | both | `metalfx` | `off` (no scaling, no model — the decoded frame at its own size), `bypass` (bilinear, scaled but unenhanced), `cnn` (Anime4K CNN), `cnnDenoise` (denoise weights), `metalfx` (MetalFX Spatial, general/live-action video), `realesrgan` (Real-ESRGAN AnimeVideo-v3, 4× only and SD-only), `realesrgan-general` (Real-ESRGAN General-x4, the same constraint) |
+| `--mode` | both | `metalfx` | `off` (no scaling, no model — the decoded frame at its own size), `bypass` (bilinear, scaled but unenhanced), `cnn` (CNN), `cnnDenoise` (denoise weights), `metalfx` (MetalFX Spatial, general/live-action video), `realesrgan` (Real-ESRGAN AnimeVideo-v3, 4× only and SD-only), `realesrgan-general` (Real-ESRGAN General-x4, the same constraint) |
 | `--scale` | both | `2` | output magnification: `2` or `4` (see below) |
 | `--no-audio` | both | off | drop audio |
 | `--seconds` | playercheck | 30 | how long to run before printing the summary |
@@ -288,7 +288,7 @@ same frame, at the same instant, at the same output size. The left half shows th
 model picked on the left, the right half shows the enhancement (the enhancement
 menu's model), and a thin white line marks the boundary.
 
-- Either side can be any model — **Anime4K CNN, CNN + denoise, MetalFX Spatial,
+- Either side can be any model — **CNN, CNN + denoise, MetalFX Spatial,
   Real-ESRGAN, or Original**, where Original is the bypass path: the source
   upscaled with a plain bilinear filter, which is what any other player would show.
   Real-ESRGAN is 4× only, so it can only be a half of a 4× session; asking for it
@@ -320,7 +320,7 @@ menu's model), and a thin white line marks the boundary.
 ## Layout
 
 ```
-engine/Anime4KMetal/      Metal port of Anime4K v3.2 Upscale_CNN_x2_M (+ denoise), an4kbench CLI
+engine/VideoUpscaleMetal/ Metal CNN 2× pipeline (Anime4K v3.2 weights), vupbench CLI
 engine/MacVideoUpscaler/     the app: MacVideoUpscalerCore + macvideoupscale (CLI) + MacVideoUpscalerApp (SwiftUI)
                           + playercheck (embedded-player harness)
   MacVideoUpscalerCore/      PlayerController + EmbeddedPlayer (in-app), PipelineController (stream),

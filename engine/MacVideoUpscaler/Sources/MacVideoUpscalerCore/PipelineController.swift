@@ -70,6 +70,11 @@ public final class PipelineController {
     /// join would always burn its full timeout and every seek would stall for
     /// seconds. This atomic lets finishSession decide without the lock.
     private let restartMirror = OSAllocatedUnfairLock(initialState: false)
+    /// Mirror of `stopFlag` readable WITHOUT holding `ctrl`, for the same
+    /// reason as `restartMirror`: finishSession runs while beginSessionLocked
+    /// holds `ctrl` joining this very worker, so the flag itself is unreadable
+    /// there.
+    private let stopMirror = OSAllocatedUnfairLock(initialState: false)
 
     public private(set) var currentFile: URL?
     public private(set) var kind: ScalerKind = ScalerKind.defaultKind
@@ -109,10 +114,13 @@ public final class PipelineController {
     /// and VLC's absolute time carries an unknown base (observed +38 s on a
     /// session starting at 600 s), so we use the elapsed-since-open delta.
     public var playbackSeconds: Double? {
-        guard let c = vlc?.clock, c.valid else { return nil }
+        // `vlc` is read under `ctrl` like every other access to it; the Clock
+        // snapshot itself is guarded by VLCController's own lock.
         ctrl.lock()
+        let c = vlc?.clock
         let origin = startAt
         ctrl.unlock()
+        guard let c, c.valid else { return nil }
         return origin + c.elapsed
     }
 
@@ -128,6 +136,9 @@ public final class PipelineController {
     /// The VLC clock is not used here: its absolute value carries an unknown base
     /// and, with dummy outputs, can run at input rate rather than real time. Its
     /// elapsed value is still published for diagnostics.
+    ///
+    /// Reads `frameIndex`/`startAt`/`muxer`/`decoder`, so call with `ctrl` held
+    /// (every caller does; `seek(by:)` takes it around the call).
     private func resumePosition() -> Double {
         let lead = Double(ring.bufferedBytes) * 8.0 / Double(max(muxer?.videoBitrateBps ?? 1, 1))
         let estimate = startAt + Double(frameIndex) / max(decoder?.meta.fps ?? 30, 1) - lead
@@ -229,7 +240,10 @@ public final class PipelineController {
             ctrl.unlock()
             return
         }
-        let factorChanged = resolved != effectiveFactor
+        // Crossing to or from `off` changes the output geometry (1:1 against the
+        // factor) even when the resolved factor is unchanged, so it is a restart
+        // like a scale change; the player's setKind applies the same rule.
+        let factorChanged = resolved != effectiveFactor || self.kind.magnifies != kind.magnifies
         self.kind = kind
         self.scaler = nil
         status.update { $0.mode = kind.displayName }
@@ -257,17 +271,26 @@ public final class PipelineController {
     @discardableResult
     public func startPlayback() -> Bool {
         guard currentFile != nil else { return false }
-        if vlc == nil { vlc = VLCController() }
-        guard let vlc else { return false }
-        vlc.play(streamURL)
-        status.update { $0.vlcHttpPort = Int(vlc.httpPort) }
+        // The reference is created/reused under `ctrl`, but play() runs outside
+        // it: VLCController calls issue HTTP commands and can block.
+        ctrl.lock()
+        let session = vlc ?? VLCController()
+        vlc = session
+        ctrl.unlock()
+        guard let session else { return false }
+        session.play(streamURL)
+        status.update { $0.vlcHttpPort = Int(session.httpPort) }
         return true
     }
 
     public func pause() {
         // Coordinate with the player: pausing only the frame worker left VLC
         // playing out the queued ring, which is not what "pause" means to a viewer.
-        vlc?.pause()
+        // The reference is read under `ctrl`; pause() itself runs outside it.
+        ctrl.lock()
+        let session = vlc
+        ctrl.unlock()
+        session?.pause()
         ctrl.lock()
         pausedFlag = true
         ctrl.unlock()
@@ -278,8 +301,9 @@ public final class PipelineController {
         ctrl.lock()
         pausedFlag = false
         ctrl.signal()
+        let session = vlc
         ctrl.unlock()
-        vlc?.resume()
+        session?.resume()
         status.update { $0.state = .processing }
     }
 
@@ -306,40 +330,52 @@ public final class PipelineController {
         // not join the worker here or that wait just times out first.
         ctrl.lock()
         beginSessionLocked(startAt: target)
+        let session = vlc
         ctrl.unlock()
         // Reopen the player on the new session instead of asking the user to do
-        // it by hand; the old URL is gone (410).
-        vlc?.play(streamURL)
+        // it by hand; the old URL is gone (410). play() runs outside `ctrl`.
+        session?.play(streamURL)
         onSessionRestart?(streamURL)
     }
 
     public func seek(by delta: Double) {
         // Relative to what the viewer is watching, not to the production
-        // frontier (which can be minutes ahead).
-        seek(to: resumePosition() + delta)
+        // frontier (which can be minutes ahead). resumePosition() reads
+        // frameIndex/muxer/decoder, so it runs under `ctrl` like its other
+        // callers; seek(to:) takes the lock itself.
+        ctrl.lock()
+        let pos = resumePosition()
+        ctrl.unlock()
+        seek(to: pos + delta)
     }
 
     public func stop() {
-        vlc?.stop()
-        vlc = nil
+        // Nil the reference under `ctrl` so no other thread picks it up, then
+        // stop the controller outside the lock (it waits on the VLC process).
         ctrl.lock()
+        let session = vlc
+        vlc = nil
         stopFlag = true
+        stopMirror.withLock { $0 = true }
         restartFlag = false
         restartMirror.withLock { $0 = false }
         pausedFlag = false
         ctrl.broadcast()
         ctrl.unlock()
+        session?.stop()
         // Same backpressure problem as a seek: unblock the parked worker/pump
-        // before joining, or stop() blocks for the join timeout.
+        // before joining, or stop() blocks for the join timeout. The decoder's
+        // read(2) is one of those parking spots, so it is stopped before the
+        // join as well.
         ring.reset()
         muxer?.terminate()
         muxer = nil
+        decoder?.stop()
+        decoder = nil
         worker?.join(timeout: 3)
         worker = nil
         stdoutPump?.join(timeout: 2)
         stdoutPump = nil
-        decoder?.stop()
-        decoder = nil
         status.update { $0.state = .idle }
     }
 
@@ -352,6 +388,13 @@ public final class PipelineController {
         // muxer's stdin. Both only wake if the ring is reset AND the muxer is
         // killed, so do that BEFORE joining: otherwise each join below waits out
         // its full timeout and a single seek takes tens of seconds.
+        //
+        // The worker's third parking spot is the decoder's blocking read(2),
+        // released only by decoder.stop(), so the decoder is stopped before the
+        // join too (the same order as the player's session teardown). Joining
+        // first let a worker that outlasted the join timeout wake up after the
+        // flag resets below and run finishSession() against the NEW session,
+        // tearing the new muxer/decoder down.
         //
         // reset() also drops any leftover TS bytes from the old session, which
         // would otherwise be flushed into the new one (stale/garbled start).
@@ -367,6 +410,9 @@ public final class PipelineController {
         muxer?.terminate()    // closes stdin + kills ffmpeg -> unblocks the worker
         muxer = nil
         mark("muxer.terminate")
+        decoder?.stop()       // releases a worker parked in the decoder's read(2)
+        decoder = nil
+        mark("decoder.stop")
 
         ctrl.broadcast()      // wake a paused worker so it sees restart/stop
         worker?.join(timeout: 3)
@@ -375,9 +421,6 @@ public final class PipelineController {
         stdoutPump?.join(timeout: 2)
         stdoutPump = nil
         mark("pump.join")
-        decoder?.stop()
-        decoder = nil
-        mark("decoder.stop")
         outBuffers = nil
         srcTexture = nil
         stagingBuffer = nil
@@ -385,6 +428,7 @@ public final class PipelineController {
         restartFlag = false
         restartMirror.withLock { $0 = false }
         stopFlag = false
+        stopMirror.withLock { $0 = false }
         pausedFlag = false
         frameIndex = 0
         sessionStartTime = Date()
@@ -459,7 +503,10 @@ public final class PipelineController {
         }
         effectiveFactor = eff
         var scaleNote = ""
-        if let pinned = kind.pinnedFactor, pinned != reqFactor {
+        if !kind.magnifies {
+            scaleNote = "Off — playing at the source's own \(sw)x\(sh); the "
+                + "magnification setting does not apply."
+        } else if let pinned = kind.pinnedFactor, pinned != reqFactor {
             scaleNote = "\(kind.displayName) is \(pinned.displayName) only; using \(pinned.displayName)."
         } else if eff != reqFactor {
             scaleNote = "\(reqFactor.displayName) needs \(sw * reqFactor.rawValue)×\(sh * reqFactor.rawValue), "
@@ -483,7 +530,11 @@ public final class PipelineController {
         srcDesc.storageMode = .shared
         srcTexture = ctx.device.makeTexture(descriptor: srcDesc)
 
-        let ow = sw * eff.rawValue, oh = sh * eff.rawValue
+        // `off` is the one kind that does not magnify: its output is the source's
+        // own geometry (CopyScaler is 1:1 and rejects anything else), so the
+        // resolved factor is not applied. Same rule as the player's session build.
+        let ow = kind.magnifies ? sw * eff.rawValue : sw
+        let oh = kind.magnifies ? sh * eff.rawValue : sh
         do {
             outBuffers = try OutputBufferRing(device: ctx.device, width: ow, height: oh, depth: 3)
         } catch {
@@ -709,7 +760,11 @@ public final class PipelineController {
             if !wrote { return false }
 
             // 5) Stats.
+            // frameIndex is read under `ctrl` (resumePosition), so the
+            // increment takes it too; released before postStatusIfNeeded().
+            ctrl.lock()
             frameIndex += 1
+            ctrl.unlock()
             postStatusIfNeeded()
             return true
         }
@@ -739,12 +794,14 @@ public final class PipelineController {
 
     /// Session teardown after processOneFrame returns false.
     private func finishSession() {
-        // Read through the atomic, NOT `ctrl`: beginSessionLocked holds `ctrl`
-        // while joining this worker, so a locked read here would deadlock and
-        // make every seek wait out the join timeout. See `restartMirror`.
+        // Both read through their atomics, NOT `ctrl`: beginSessionLocked holds
+        // `ctrl` while joining this worker, so a locked read here would deadlock
+        // and make every seek wait out the join timeout. See `restartMirror`.
         let endedByRestart = restartMirror.withLock { $0 }
-        if endedByRestart {
-            // Seek path: next session tears everything down (muxer killed there).
+        if endedByRestart || stopMirror.withLock({ $0 }) {
+            // Seek or stop path: whatever ended the session tears everything down
+            // and posts the state itself. Returning keeps a worker that outlived
+            // stop()'s join from flipping the just-posted .idle back to .finished.
             return
         }
         // EOF or stop: flush the encoder so the TS tail lands in the ring.
@@ -814,8 +871,13 @@ public final class PipelineController {
         // is carried alongside for diagnostics only.
         let buffered = ring.bufferedBytes
         let leadSeconds = Double(buffered) * 8.0 / Double(max(muxer?.videoBitrateBps ?? 1, 1))
-        let vlcClock = vlc?.clock
-        let hasClient = status.current.clients > 0 || (vlc?.isRunning ?? false)
+        // `vlc` is read under `ctrl` like every other access to it; the clock
+        // and isRunning reads themselves are the controller's own locked state.
+        ctrl.lock()
+        let session = vlc
+        ctrl.unlock()
+        let vlcClock = session?.clock
+        let hasClient = status.current.clients > 0 || (session?.isRunning ?? false)
         let playPos = max(startAt, pos - leadSeconds)
         status.update {
             $0.state = .processing

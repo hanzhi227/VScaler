@@ -2,8 +2,8 @@ import Foundation
 import Metal
 import CoreVideo
 
-/// A 2x-only frame scaler. Both back ends are fixed at 2x: the Anime4K CNN
-/// models output exactly 2x, and the bilinear kernel hard-codes a 0.5 step.
+/// A 2x-only frame scaler. Both back ends are fixed at 2x: the CNN models
+/// output exactly 2x, and the bilinear kernel hard-codes a 0.5 step.
 protocol TwoXScaler: AnyObject {
     var label: String { get }
     func scale(src: MTLTexture, dst: MTLTexture) throws
@@ -11,10 +11,10 @@ protocol TwoXScaler: AnyObject {
 
 /// Selectable output magnification.
 ///
-/// There is no native 3x or 4x kernel: Anime4K ships the CNN at 2x and its own
-/// documented 4x setup is two chained passes, so 4x here is the 2x scaler
-/// applied twice (through a reused intermediate). A 3x mode would need a
-/// different model, so it is deliberately not offered.
+/// There is no native 3x or 4x kernel: the CNN ships at 2x and its documented
+/// 4x setup is two chained passes, so 4x here is the 2x scaler applied twice
+/// (through a reused intermediate). A 3x mode would need a different model, so
+/// it is deliberately not offered.
 public enum UpscaleFactor: Int, CaseIterable, Codable, Sendable, Comparable {
     case x2 = 2
     case x4 = 4
@@ -67,8 +67,8 @@ final class ChainedScaler: FrameScaler {
 public enum ScalerKind: String, CaseIterable, Codable {
     case off         // no scaling and no model: the source, pixel for pixel
     case bypass      // plain bilinear ("enhancement off", but still scaled)
-    case cnn         // Anime4K CNN (Metal port)
-    case cnnDenoise  // Anime4K CNN + denoise
+    case cnn         // CNN x2 (Metal port of Anime4K v3.2 Upscale_CNN_x2_M)
+    case cnnDenoise  // CNN x2 + denoise
     case metalFX     // MetalFX Spatial — general (live-action) video
     case realESRGAN  // Real-ESRGAN animevideov3 (Metal/MPSGraph port), 4x only
     case realESRGANGeneral  // Real-ESRGAN general-x4v3, same port, 4x only
@@ -77,8 +77,8 @@ public enum ScalerKind: String, CaseIterable, Codable {
         switch self {
         case .off: return "Off (no scaling)"
         case .bypass: return "Bypass (bilinear)"
-        case .cnn: return "Anime4K CNN"
-        case .cnnDenoise: return "Anime4K CNN + denoise"
+        case .cnn: return "CNN"
+        case .cnnDenoise: return "CNN + denoise"
         case .metalFX: return "MetalFX Spatial"
         case .realESRGAN: return "Real-ESRGAN AnimeVideo-v3 (4×)"
         case .realESRGANGeneral: return "Real-ESRGAN General-x4 (4×)"
@@ -96,9 +96,9 @@ public enum ScalerKind: String, CaseIterable, Codable {
             return "No enhancement, but still scaled — plain bilinear, what another "
                 + "player would show"
         case .cnn:
-            return "Anime4K CNN — best for animation"
+            return "CNN — 2× upscale, strong on animation and clean edges"
         case .cnnDenoise:
-            return "Anime4K CNN + denoise — for noisy or heavily compressed animation"
+            return "CNN + denoise — for noisy or heavily compressed sources"
         case .metalFX:
             return "MetalFX Spatial — for live action and clean HD: crisp and "
                 + "much cheaper than the CNN, but it sharpens past the source"
@@ -106,7 +106,7 @@ public enum ScalerKind: String, CaseIterable, Codable {
             return "Real-ESRGAN AnimeVideo-v3 — a generative model trained on anime "
                 + "video, 4× and SD only. Sharp on clean animation, but it rebuilds "
                 + "fine texture as smooth blobs and expands bright highlights, which "
-                + "shows on real (non-anime) video; the Anime4K CNN and MetalFX keep "
+                + "shows on real (non-anime) video; the CNN and MetalFX keep "
                 + "that detail better"
         case .realESRGANGeneral:
             return "Real-ESRGAN General-x4 — the same network, twice as deep, "
@@ -163,7 +163,7 @@ public enum ScalerKind: String, CaseIterable, Codable {
 
 enum ScalerFactory {
     static func make(kind: ScalerKind, factor: UpscaleFactor, ctx: MetalContext) throws -> FrameScaler {
-        // The Anime4K/bilinear back ends are 2x kernels, so 4x chains two of them.
+        // The CNN/bilinear back ends are 2x kernels, so 4x chains two of them.
         // MetalFX takes the output geometry directly, so it needs no chaining: one
         // encode does the whole magnification, which also means its sharpening is
         // applied once rather than twice. `off` does not magnify at all, and
@@ -173,12 +173,12 @@ enum ScalerFactory {
         case .off:
             return try CopyScaler(ctx: ctx)
         case .bypass:
-            return ChainedScaler(base: BilinearScaler(ctx: ctx), factor: factor, device: ctx.device)
+            return ChainedScaler(base: try BilinearScaler(ctx: ctx), factor: factor, device: ctx.device)
         case .cnn:
-            return ChainedScaler(base: try Anime4KScaler(mode: .cnnX2M, ctx: ctx),
+            return ChainedScaler(base: try CNNScaler(mode: .cnnX2M, ctx: ctx),
                                  factor: factor, device: ctx.device)
         case .cnnDenoise:
-            return ChainedScaler(base: try Anime4KScaler(mode: .cnnDenoiseX2M, ctx: ctx),
+            return ChainedScaler(base: try CNNScaler(mode: .cnnDenoiseX2M, ctx: ctx),
                                  factor: factor, device: ctx.device)
         case .metalFX:
             return try MetalFXScaler(factor: factor, ctx: ctx)
@@ -228,7 +228,7 @@ enum ScalerFactory {
     }
 
     static var cnnAvailable: Bool {
-        #if HAVE_ANIME4K_METAL
+        #if HAVE_VIDEO_UPSCALE_METAL
         return true
         #else
         return false
@@ -242,10 +242,11 @@ final class BilinearScaler: TwoXScaler {
     private let ctx: MetalContext
     private let pipeline: MTLComputePipelineState
 
-    init(ctx: MetalContext) {
+    /// Throwing like `CopyScaler.init`: a missing kernel or pipeline is a
+    /// recoverable failure the session reports, not a reason to abort.
+    init(ctx: MetalContext) throws {
         self.ctx = ctx
-        let fn = try! ctx.function("bilinear2x")
-        self.pipeline = try! ctx.device.makeComputePipelineState(function: fn)
+        self.pipeline = try ctx.device.makeComputePipelineState(function: ctx.function("bilinear2x"))
     }
 
     func scale(src: MTLTexture, dst: MTLTexture) throws {
@@ -324,17 +325,17 @@ final class CopyScaler: FrameScaler {
     }
 }
 
-#if HAVE_ANIME4K_METAL
-import Anime4KMetal
+#if HAVE_VIDEO_UPSCALE_METAL
+import VideoUpscaleMetal
 
-/// Anime4K v3.2 CNN x2, Metal compute port (see engine/Anime4KMetal).
-final class Anime4KScaler: TwoXScaler {
+/// CNN x2 Metal compute port (see engine/VideoUpscaleMetal; weights from Anime4K v3.2).
+final class CNNScaler: TwoXScaler {
     let label: String
-    private let pipeline: Anime4KPipeline
+    private let pipeline: VideoUpscalingPipeline
 
     init(mode: UpscaleMode, ctx: MetalContext) throws {
-        self.pipeline = try Anime4KPipeline(device: ctx.device, mode: mode)
-        self.label = "anime4k-\(mode.rawValue)"
+        self.pipeline = try VideoUpscalingPipeline(device: ctx.device, mode: mode)
+        self.label = "cnn-\(mode.rawValue)"
     }
 
     func scale(src: MTLTexture, dst: MTLTexture) throws {
@@ -381,105 +382,5 @@ final class RealESRGANScaler: FrameScaler {
 
     func scale(src: MTLTexture, dst: MTLTexture) throws {
         try pipeline.upscale(src, into: dst)
-    }
-}
-
-/// Composes the side-by-side comparison: the left of `split` comes from a second
-/// scaler's output, the right keeps what the main pipeline produced, and a thin
-/// bright divider marks the boundary.
-///
-/// Each side is produced by a real `FrameScaler`, so a half is *exactly* what
-/// that model outputs (not an approximation of it), and any pair of models can be
-/// compared — including one model against itself, or the plain bilinear upscale
-/// that stands in for the original video.
-///
-/// The extra cost is the second model's pass, and it is smaller than it looks:
-/// the frame loop is paced by the renderer, not by the GPU. Measured with two
-/// *different* CNNs, 640x480 -> 1280x960 held 0.995x realtime against 0.997x for
-/// one model, and the 4x worst case (640x480 -> 2560x1920) held 1.000x against
-/// 0.999x — so no frame rate is lost on this machine. It is real GPU work, on a
-/// GPU with headroom to spare: a slower GPU or a larger output could show it.
-/// The memory is less forgiving, since a second CNN allocates its own weights and
-/// intermediates (4x: ~305 MB in flight against ~205 MB for one model).
-final class SplitCompositor {
-    private let ctx: MetalContext
-    private let pipeline: MTLComputePipelineState
-    private let dividerPipeline: MTLComputePipelineState
-
-    init(ctx: MetalContext) throws {
-        self.ctx = ctx
-        self.pipeline = try ctx.device.makeComputePipelineState(function: ctx.function("compositeSplit"))
-        self.dividerPipeline = try ctx.device.makeComputePipelineState(function: ctx.function("dividerSplit"))
-    }
-
-    /// Thickness of the divider in output pixels, proportional so it reads the
-    /// same at 2x 1080p and 4x 4K.
-    static func dividerWidth(forWidth width: Int) -> Int { max(2, width / 640) }
-
-    /// Draws the divider alone, for when the two sides are the same model and the
-    /// picture underneath is already correct.
-    func drawDivider(into dst: MTLTexture, at split: Int, divider: Int) throws {
-        try dispatch(pipeline: dividerPipeline, read: nil, write: dst,
-                     to: max(0, split) + divider, split: split, divider: divider)
-    }
-
-    /// Copies `left`'s pixels in [0, split) into `dst`, then paints the divider
-    /// columns at [split, split + divider).
-    func composite(left: MTLTexture, into dst: MTLTexture,
-                   split: Int, divider: Int) throws {
-        try dispatch(pipeline: pipeline, read: left, write: dst,
-                     to: max(0, split) + divider, split: split, divider: divider)
-    }
-
-    /// `to` is the first output column after the divider; the grid always starts
-    /// at column 0.
-    ///
-    /// The kernels address columns absolutely (`gid.x`), and a threadgroup grid is
-    /// laid out from the origin, so a grid spanning only the columns the pass will
-    /// actually change runs its threads *before* the split and paints nothing —
-    /// which is what left "compare the same model with itself" with no divider at
-    /// all. Both kernels ignore the columns they are not responsible for, so the
-    /// extra threads are a wider dispatch of a pass that already covers the frame.
-    private func dispatch(pipeline: MTLComputePipelineState, read: MTLTexture?,
-                          write dst: MTLTexture, to: Int,
-                          split: Int, divider: Int) throws {
-        let end = min(dst.width, max(0, to))
-        guard end > 0 else { return }
-        var splitValue = Int32(max(0, min(split, dst.width)))
-        var dividerValue = Int32(max(0, divider))
-
-        let desc = MTLCommandBufferDescriptor()
-        desc.retainedReferences = false
-        guard let cb = ctx.queue.makeCommandBuffer(descriptor: desc),
-              let enc = cb.makeComputeCommandEncoder() else {
-            throw EngineError.metalUnavailable
-        }
-        enc.setComputePipelineState(pipeline)
-        if let read { enc.setTexture(read, index: 0) }
-        enc.setTexture(dst, index: 1)
-        enc.setBytes(&splitValue, length: MemoryLayout<Int32>.size, index: 0)
-        enc.setBytes(&dividerValue, length: MemoryLayout<Int32>.size, index: 1)
-        let tg = MTLSize(width: 16, height: 16, depth: 1)
-        let groups = MTLSize(width: (end + tg.width - 1) / tg.width,
-                             height: (dst.height + tg.height - 1) / tg.height,
-                             depth: 1)
-        enc.dispatchThreadgroups(groups, threadsPerThreadgroup: tg)
-        enc.endEncoding()
-        cb.commit()
-        cb.waitUntilCompleted()
-        if let err = cb.error { throw err }
-    }
-
-    /// A scratch target for the left model, at the same geometry as the output.
-    /// Private: it is only ever read by the composite, never presented.
-    func makeScratch(width: Int, height: Int) throws -> MTLTexture {
-        let d = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false)
-        d.usage = [.shaderRead, .shaderWrite]
-        d.storageMode = .private
-        guard let t = ctx.device.makeTexture(descriptor: d) else {
-            throw EngineError.metalUnavailable
-        }
-        return t
     }
 }

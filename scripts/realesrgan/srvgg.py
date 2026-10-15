@@ -99,6 +99,10 @@ class Upscaler:
         self.scale = SCALE
         self.tile = tile
         self.overlap = overlap
+        if tile and tile <= 2 * overlap:
+            raise ValueError(f"tile ({tile}) must be greater than 2 * overlap "
+                             f"({2 * overlap}), or the tiled pass cannot advance and "
+                             f"part of the frame would never be written")
 
     @torch.no_grad()
     def upscale(self, x):

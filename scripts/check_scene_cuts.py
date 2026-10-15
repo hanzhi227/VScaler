@@ -92,12 +92,14 @@ def main():
     cuts = cut_times(args.source, args.threshold, args.max_cuts)
     print(f"detected {len(cuts)} cut(s): {', '.join(f'{c:.2f}s' for c in cuts)}")
     if not cuts:
-        print("no cuts found — lower --threshold")
-        return
+        print("no cuts found: nothing was checked, so this cannot count as a pass. "
+              "Lower --threshold or point --source at the right file.")
+        raise SystemExit(1)
 
     print(f"\n{'cut':>7} {'motion corr':>12} {'shift':>6} {'peak ours':>10} {'peak src':>9} "
           f"{'ratio':>7}  verdict")
     ok = True
+    evaluated = 0
     for t in cuts:
         t0, t1 = max(0.0, t - args.window), t + args.window
         ms = motion_series(args.stream, t0, t1)
@@ -106,6 +108,7 @@ def main():
         if n < 5:
             print(f"{t:>7.2f}  (window too short)")
             continue
+        evaluated += 1
         corr, shift = best_alignment(ms[:n], mr[:n])
         peak_o, peak_r = float(ms[:n].max()), float(mr[:n].max())
         ratio = peak_o / peak_r if peak_r > 1e-6 else float("nan")
@@ -116,22 +119,35 @@ def main():
             k for k, v in (("correlation", corr >= 0.90), ("flash", flash_ok)) if not v)
         print(f"{t:>7.2f} {corr:>12.3f} {shift:>6d} {peak_o:>10.2f} {peak_r:>9.2f} "
               f"{ratio:>7.2f}  {note}")
+    if evaluated == 0:
+        print("\nno cut window yielded enough frames to judge")
+        ok = False
 
     cnt = run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_packets",
                "-show_entries", "stream=nb_read_packets", "-of", "csv=p=0",
                str(args.stream)]).stdout.strip()
     dur = run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
                "-of", "csv=p=0", str(args.stream)]).stdout.strip()
+    continuity_ok = None
     try:
         expected = float(dur) * args.fps
         got = float(cnt)
+        drift = abs(got - expected)
+        tol = max(2.0, 0.02 * expected)  # container duration vs fps rounding
+        continuity_ok = drift <= tol
         print(f"\nframe continuity: {int(got)} frames in {float(dur):.2f}s "
-              f"(expected ~{expected:.0f}, {100.0 * (got - expected) / expected:+.2f}%)")
+              f"(expected ~{expected:.0f}, {100.0 * (got - expected) / expected:+.2f}%, "
+              f"tolerance {tol:.0f} frames) -> {'ok' if continuity_ok else 'MISMATCH'}")
     except ValueError:
-        pass
+        print("\nframe continuity: could not measure (no packet count or duration)")
+    ok = ok and continuity_ok is True
 
-    print("\nverdict:", "OK (motion preserved at cuts, no added flash, 1:1 frame mapping)"
-          if ok else "CHECK (see rows above)")
+    verdict = "OK (motion preserved at cuts, no added flash, frame continuity verified)"
+    if continuity_ok is not True:
+        verdict = "CHECK (frame continuity not verified: see above)"
+    elif not ok:
+        verdict = "CHECK (see rows above)"
+    print("\nverdict:", verdict)
     raise SystemExit(0 if ok else 1)
 
 

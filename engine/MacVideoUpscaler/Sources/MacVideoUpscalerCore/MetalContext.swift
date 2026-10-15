@@ -38,35 +38,22 @@ final class MetalContext {
                            uint2 gid [[thread_position_in_grid]]) {
         if (gid.x >= dst.get_width() || gid.y >= dst.get_height()) { return; }
         float2 uv = (float2(gid) + 0.5f) * 0.5f - 0.5f;
-        int2 p00 = int2(floor(uv));
         int sw = src.get_width(), sh = src.get_height();
+        // Clamp the base texel into range BEFORE deriving its neighbours: at
+        // the left/top edge uv goes negative, and an unclamped floor of -1 was
+        // inherited by p01/p10/p11, reading outside the texture (Metal returns
+        // 0 there) and darkening the whole first column and row. Interior
+        // texels are nowhere near the clamps and are unchanged.
+        int2 p00 = clamp(int2(floor(uv)), int2(0), int2(sw - 1, sh - 1));
         float2 f = fract(uv);
         int2 p10 = int2(min(p00.x + 1, sw - 1), p00.y);
         int2 p01 = int2(p00.x, min(p00.y + 1, sh - 1));
         int2 p11 = int2(min(p00.x + 1, sw - 1), min(p00.y + 1, sh - 1));
-        p00 = int2(max(p00.x, 0), max(p00.y, 0));
         float4 c = (1.0f - f.x) * (1.0f - f.y) * src.read(uint2(p00))
                  + f.x * (1.0f - f.y) * src.read(uint2(p10))
                  + (1.0f - f.x) * f.y * src.read(uint2(p01))
                  + f.x * f.y * src.read(uint2(p11));
         dst.write(c, gid);
-    }
-
-    // Comparison overlay: copies x < `split` from `left` into dst and paints
-    // `divider` bright columns at the boundary. dst already holds the right-hand
-    // model, so this only moves the left model's pixels into place — the two
-    // sides are each produced by a real scaler, which is what makes the halves
-    // exactly what those models output rather than an approximation of it.
-    kernel void compositeSplit(texture2d<float, access::read> left [[texture(0)]],
-                               texture2d<float, access::write> dst [[texture(1)]],
-                               constant int &split [[buffer(0)]],
-                               constant int &divider [[buffer(1)]],
-                               uint2 gid [[thread_position_in_grid]]) {
-        int dw = dst.get_width(), dh = dst.get_height();
-        if (gid.x >= dw || gid.y >= dh) { return; }
-        int sx = clamp(split, 0, dw);
-        if (gid.x < sx) { dst.write(left.read(gid), gid); return; }
-        if (gid.x < min(sx + divider, dw)) { dst.write(float4(1.0f), gid); }
     }
 
     // The "off" position: a straight 1:1 copy, no interpolation and no model.
@@ -82,22 +69,6 @@ final class MetalContext {
         dst.write(src.read(gid), gid);
     }
 
-    // Just the divider, for when both sides are the same model: the pixels are
-    // already right everywhere, so nothing has to be read — which is also why
-    // this is a separate kernel rather than one reading and writing the same
-    // texture, which Metal leaves undefined. The output is at index 1 (the
-    // dispatcher binds a read texture at 0 first), so a divider-only run writes
-    // the frame it was handed rather than into whatever index 0 holds.
-    kernel void dividerSplit(texture2d<float, access::write> dst [[texture(1)]],
-                             constant int &split [[buffer(0)]],
-                             constant int &divider [[buffer(1)]],
-                             uint2 gid [[thread_position_in_grid]]) {
-        int dw = dst.get_width(), dh = dst.get_height();
-        if (gid.x >= dw || gid.y >= dh) { return; }
-        if (gid.x >= split && gid.x < min(split + divider, dw)) {
-            dst.write(float4(1.0f), gid);
-        }
-    }
     """
 }
 

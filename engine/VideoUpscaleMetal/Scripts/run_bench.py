@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Benchmark driver for the Anime4K Metal port.
+Benchmark driver for the video upscaling Metal port.
 
-Runs an4kbench over a fixed config matrix, optionally samples GPU utilisation
+Runs vupbench over a fixed config matrix, optionally samples GPU utilisation
 from `ioreg -c IOAccelerator` while a run is in flight, and writes:
   results/metal/bench.json
   results/metal/BENCH.md
 
-Usage: run_bench.py <an4kbench binary> [results/metal dir]
+Usage: run_bench.py <vupbench binary> [results/metal dir]
 """
 import json
 import os
@@ -22,7 +22,7 @@ ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 RESULTS = sys.argv[2] if len(sys.argv) > 2 else os.path.join(ROOT, "results", "metal")
 ASSETS = os.path.join(RESULTS, "assets")
 BIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
-    SCRIPT_DIR, "..", ".build", "release", "an4kbench")
+    SCRIPT_DIR, "..", ".build", "release", "vupbench")
 BIN = os.path.abspath(BIN)
 
 INPUT_480 = os.path.join(ASSETS, "test_480p.png")
@@ -116,9 +116,9 @@ def main():
 
     # ---- BENCH.md ----
     lines = []
-    lines.append("# Anime4K Metal (M5 Pro) benchmark\n")
+    lines.append("# VideoUpscaleMetal (M5 Pro) benchmark\n")
     lines.append(f"- Device: **{device}**")
-    lines.append("- Harness: `an4kbench`, synchronous `commit()` + `waitUntilCompleted()` per frame")
+    lines.append("- Harness: `vupbench`, synchronous `commit()` + `waitUntilCompleted()` per frame")
     lines.append("- Timing: wall-clock ms/frame, first iteration excluded as warmup; "
                  "mean over all timed iterations, with median/min because the odd "
                  "scheduler spike can inflate the mean at small sizes")
@@ -139,15 +139,45 @@ def main():
             f"**{r['ms_per_frame']:.3f}** | {r['min_ms']:.3f} | {r['median_ms']:.3f} | "
             f"{r['fps']:.1f} | {gpu} |")
     lines.append("")
+    # Validation summary: every number is read from validation.json, so a
+    # regression shows up here instead of being papered over by fixed strings.
     lines.append("## Validation summary\n")
-    lines.append("See `validation.json`. Key results:")
-    lines.append("- Output dimensions exactly 2x; zero NaN/Inf in the fp32 output")
-    lines.append("- Metal output matches an independent NumPy port of the same GLSL weights "
-                 "to **<= 1 LSB** (0.00% of pixels differ by more than 1/255)")
-    lines.append("- Orientation preserved (forward row-profile correlation 0.998 vs "
-                 "mirrored -0.905)")
-    lines.append("- Line-art acutance vs bilinear: hatching **7.8x**, text **5.9x**")
-    lines.append("- Flat cel region reproduced exactly (200.0 -> 200.0)\n")
+    try:
+        with open(os.path.join(RESULTS, "validation.json")) as f:
+            v = json.load(f)
+    except (OSError, ValueError):
+        v = None
+    needed = ("output_size", "ref_maxdiff_cnnX2M", "ref_pct_pixels_gt1_cnnX2M",
+              "row_profile_corr_input_vs_cnn", "row_profile_corr_input_vs_mirrored_cnn",
+              "acutance_hatch_bilinear", "acutance_hatch_cnn",
+              "acutance_text_bilinear", "acutance_text_cnn")
+    if isinstance(v, dict) and all(k in v for k in needed):
+        lines.append("Values below are whatever this run actually produced; the full "
+                     "field list is in `validation.json`.")
+        hatch_ratio = (v["acutance_hatch_cnn"] / v["acutance_hatch_bilinear"]
+                       if v.get("acutance_hatch_bilinear") else None)
+        text_ratio = (v["acutance_text_cnn"] / v["acutance_text_bilinear"]
+                      if v.get("acutance_text_bilinear") else None)
+        lines.append(f"- Output size {v['output_size'][0]}x{v['output_size'][1]}, "
+                     f"dims_ok={v.get('dims_ok')}, NaN/Inf in NumPy reference: "
+                     f"{v.get('nan_inf_ref')}")
+        lines.append(f"- Metal vs independent NumPy port: max diff "
+                     f"{v['ref_maxdiff_cnnX2M']}/255, "
+                     f"{v['ref_pct_pixels_gt1_cnnX2M']}% of pixels differ by more "
+                     f"than 1/255")
+        lines.append(f"- Orientation: row-profile correlation forward "
+                     f"{v['row_profile_corr_input_vs_cnn']} vs mirrored "
+                     f"{v['row_profile_corr_input_vs_mirrored_cnn']} "
+                     f"(orientation_ok={v.get('orientation_ok')})")
+        if hatch_ratio is not None and text_ratio is not None:
+            lines.append(f"- Line-art acutance vs bilinear: hatching {hatch_ratio:.1f}x, "
+                         f"text {text_ratio:.1f}x")
+        lines.append(f"- Flat cel region: source mean {v.get('flat_region_src_mean')} "
+                     f"vs CNN mean {v.get('flat_region_cnn_mean')}\n")
+    else:
+        lines.append("`validation.json` is missing or lacks the expected fields, so no "
+                     "correctness numbers are quoted here. Run validate.py against this "
+                     "results directory and re-generate.\n")
     with open(os.path.join(RESULTS, "BENCH.md"), "w") as f:
         f.write("\n".join(lines) + "\n")
     print("wrote", os.path.join(RESULTS, "BENCH.md"), "and bench.json")

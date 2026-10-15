@@ -14,6 +14,7 @@ import CoreMedia
 public final class EmbeddedPlayer {
     public let synchronizer = AVSampleBufferRenderSynchronizer()
     public let displayLayer = AVSampleBufferDisplayLayer()
+    private let comparisonLayer = AVSampleBufferDisplayLayer()
     public let audioRenderer: AVSampleBufferAudioRenderer?
 
     private let view: PlayerView
@@ -39,9 +40,11 @@ public final class EmbeddedPlayer {
         // re-encoding it as HEVC.
         displayLayer.videoGravity = .resize
         displayLayer.backgroundColor = NSColor.black.cgColor
+        comparisonLayer.videoGravity = .resize
         synchronizer.addRenderer(displayLayer)
+        synchronizer.addRenderer(comparisonLayer)
         if let renderer { synchronizer.addRenderer(renderer) }
-        view = PlayerView(layer: displayLayer)
+        view = PlayerView(layer: displayLayer, comparison: comparisonLayer)
         audioFormat = Self.makeAudioFormat()
     }
 
@@ -74,18 +77,31 @@ public final class EmbeddedPlayer {
 
     // MARK: - Video
 
-    public var videoReady: Bool { displayLayer.isReadyForMoreMediaData }
+    public var videoReady: Bool {
+        displayLayer.isReadyForMoreMediaData && comparisonLayer.isReadyForMoreMediaData
+    }
 
     /// True once the display layer has failed. It does not recover on its own, so
     /// a producer waiting for it to become ready must stop waiting rather than
     /// spin forever.
-    public var videoFailed: Bool { displayLayer.status == .failed }
+    public var videoFailed: Bool {
+        displayLayer.status == .failed || comparisonLayer.status == .failed
+    }
 
     @discardableResult
-    public func enqueueVideo(_ sample: CMSampleBuffer) -> Bool {
-        guard displayLayer.isReadyForMoreMediaData else { return false }
+    public func enqueueVideo(_ sample: CMSampleBuffer, comparison: CMSampleBuffer) -> Bool {
+        guard videoReady else { return false }
         displayLayer.enqueue(sample)
+        comparisonLayer.enqueue(comparison)
         return true
+    }
+
+    public func setComparison(enabled: Bool, fraction: Double) {
+        let update: () -> Void = { [weak self] in
+            self?.view.setComparison(enabled: enabled, fraction: fraction)
+        }
+        if Thread.isMainThread { update() }
+        else { DispatchQueue.main.async(execute: update) }
     }
 
     /// Builds a display-ready sample buffer around an already-rendered pixel
@@ -245,9 +261,10 @@ public final class EmbeddedPlayer {
             @unknown default: return "?"
             }
         }
-        var parts = ["video=\(name(displayLayer.status))"]
+        var parts = ["video=\(name(displayLayer.status))", "comparison=\(name(comparisonLayer.status))"]
         parts.append("ready=\(displayLayer.isReadyForMoreMediaData)")
         parts.append("window=\(view.window != nil)")
+        if let e = comparisonLayer.error { parts.append("comparisonError=\(e.localizedDescription)") }
         if let e = displayLayer.error { parts.append("videoError=\(e.localizedDescription)") }
         if let r = audioRenderer {
             parts.append("audio=\(name(r.status))")
@@ -281,7 +298,9 @@ public final class EmbeddedPlayer {
     /// Drops everything queued (used on seek/session restart). Anything already
     /// enqueued belongs to the old position and must not be shown.
     public func flush(removeImage: Bool = true) {
-        if removeImage { displayLayer.flushAndRemoveImage() } else { displayLayer.flush() }
+        for layer in [displayLayer, comparisonLayer] {
+            if removeImage { layer.flushAndRemoveImage() } else { layer.flush() }
+        }
         audioRenderer?.flush()
     }
 
@@ -297,6 +316,33 @@ public final class EmbeddedPlayer {
 /// full-window/full-screen surface, and it survives SwiftUI re-parenting.
 final class PlayerView: NSView {
     private let displayLayer: AVSampleBufferDisplayLayer
+    private let comparisonLayer: AVSampleBufferDisplayLayer
+    private let wipeMask = CALayer()
+    private let divider = CALayer()
+    private var comparing = false
+    private var splitFraction: CGFloat = 0.5
+
+    func setComparison(enabled: Bool, fraction: Double) {
+        comparing = enabled
+        splitFraction = CGFloat(min(max(fraction, 0), 1))
+        // Update the mask in this event, without waiting for layout or inference.
+        layoutComparison()
+    }
+
+    private func layoutComparison() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        let picture = Self.aspectFitRect(aspect: displayAspect, in: bounds)
+        displayLayer.frame = picture
+        comparisonLayer.frame = picture
+        wipeMask.frame = CGRect(x: 0, y: 0, width: picture.width * splitFraction,
+                                height: picture.height)
+        comparisonLayer.isHidden = !comparing
+        divider.isHidden = !comparing || splitFraction <= 0 || splitFraction >= 1
+        divider.frame = CGRect(x: picture.minX + picture.width * splitFraction - 0.5,
+                               y: picture.minY, width: 1, height: picture.height)
+        CATransaction.commit()
+    }
 
     /// Display aspect ratio (width / height) of the current video.
     var displayAspect: CGFloat = 16.0 / 9.0 {
@@ -322,8 +368,9 @@ final class PlayerView: NSView {
     /// press-anywhere-to-move-the-window, wide enough to hit without aiming.
     static let dividerGrabRadius: CGFloat = 18
 
-    init(layer: AVSampleBufferDisplayLayer) {
+    init(layer: AVSampleBufferDisplayLayer, comparison: AVSampleBufferDisplayLayer) {
         self.displayLayer = layer
+        self.comparisonLayer = comparison
         super.init(frame: .zero)
         wantsLayer = true
         self.layer?.backgroundColor = NSColor.black.cgColor
@@ -333,6 +380,13 @@ final class PlayerView: NSView {
         // and anamorphic sources.
         layer.videoGravity = .resize
         self.layer?.addSublayer(layer)
+        wipeMask.backgroundColor = NSColor.white.cgColor
+        comparison.mask = wipeMask
+        comparison.isHidden = true
+        self.layer?.addSublayer(comparison)
+        divider.backgroundColor = NSColor.white.cgColor
+        divider.isHidden = true
+        self.layer?.addSublayer(divider)
     }
 
     @available(*, unavailable)
@@ -415,10 +469,7 @@ final class PlayerView: NSView {
 
     override func layout() {
         super.layout()
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)   // no implicit frame animation
-        displayLayer.frame = Self.aspectFitRect(aspect: displayAspect, in: bounds)
-        CATransaction.commit()
+        layoutComparison()
     }
 
     /// Largest rect with `aspect` that fits in `bounds`, centred.

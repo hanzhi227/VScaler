@@ -96,10 +96,17 @@ def frames_from_video(video, frames, out_dir):
     run(["ffmpeg", "-v", "error", "-y", "-i", video,
          "-vf", "select='%s'" % sel, "-fps_mode", "passthrough", pattern])
     files = sorted(f for f in os.listdir(out_dir) if f.endswith(".png"))
+    wanted = sorted(set(frames))
+    if len(files) != len(wanted):
+        # A shorter-than-asked render would otherwise be scored on fewer frames
+        # with no sign anything went wrong (the zip below just truncates).
+        raise SystemExit("%s yielded %d of the %d requested frame(s); refusing to score "
+                         "an offline row on fewer frames than asked for"
+                         % (video, len(files), len(wanted)))
     # Rename to the true frame index: one ffmpeg pass writes them in sequence, but
     # everything downstream (the flicker run, the grids) addresses them by index.
     mapping = {}
-    for idx, name in zip(sorted(frames), files):
+    for idx, name in zip(wanted, files):
         target = "frame_%04d.png" % idx
         os.rename(os.path.join(out_dir, name), os.path.join(out_dir, target))
         mapping[idx] = os.path.join(out_dir, target)

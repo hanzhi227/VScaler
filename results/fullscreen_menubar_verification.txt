@@ -1,0 +1,33 @@
+Full-screen menu bar — 2026-10-14
+
+Problem: with "Automatically hide and show the menu bar" set to Never
+(NSGlobalDomain AppleMenuBarVisibleInFullscreen = 1), the menu bar stayed over
+the picture in full screen.
+
+Findings (WindowServer "Menubar" window sampled every 0.5 s, macOS 27.0.1):
+- Native full-screen Space: the bar stays at y=0 with NSMenu.setMenuBarVisible(false),
+  with NSApp.presentationOptions [.hideMenuBar, .hideDock], and with the same
+  options returned from window(_:willUseFullScreenPresentationOptions:) in a
+  minimal AppKit app. currentSystemPresentationOptions drops .hideMenuBar (1024).
+- Ordinary window in the current Space: [.hideMenuBar, .hideDock] removes the bar;
+  [.autoHideMenuBar, .autoHideDock] slides it away and macOS reveals it at the top.
+
+Change: the app's full screen no longer uses a native Space. It saves the
+window's frame, style and presentation options, sets auto-hide menu bar and
+Dock, drops the title bar and fills the screen; exit restores everything.
+Native full screen is opted out (.fullScreenNone), so the green button zooms.
+Escape exits full screen. Display changes refit the window. Quitting exits
+full screen first so the windowed frame is what gets saved.
+
+Validation:
+  swift build -c release --package-path engine/MacVideoUpscaler
+  python3 scripts/check_chrome.py   (exit-hide window now starts at 30 s: no exit animation)
+  Diagnostic run: double-click in, Escape out, Control-Command-F in and out.
+    Window frame {{0, 0}, {1800, 1169}} = screen, key window throughout.
+    Menu bar window absent for the whole of each full-screen period; slides
+    back on exit.
+
+Not verified: real pointer at the top edge revealing the bar (no Accessibility
+or Screen Recording access to move the pointer or capture the screen).
+Unrelated: Space as a synthetic key, and via the menu key equivalent, did not
+pause in windowed or full screen; scripts do not otherwise cover it.

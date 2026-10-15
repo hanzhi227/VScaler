@@ -3,7 +3,7 @@
 # paths the GUI drives (PipelineController.pause/resume/seek/setKind):
 #   pause freezes processing, resume continues, seek starts a NEW session at
 #   the requested offset (A/V still in sync), and enhancement mode switches hot.
-set -u
+set -u -o pipefail
 P="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENGINE="$P/engine/MacVideoUpscaler/.build/debug/macvideoupscale"
 FILE="${1:-$P/test-media/segments/naruto_1080p_aligned.mkv}"
@@ -13,7 +13,9 @@ LOG=/tmp/controls_stdout.log
 S1=/tmp/controls_session1.ts
 S2=/tmp/controls_session2.ts
 
-pkill -f "macvideoupscale --file" 2>/dev/null; sleep 1
+# Only this script's own engine is managed (CLI_PID below); other engines on the
+# machine, including a concurrently running test, are left alone.
+FAIL=0
 : > "$LOG"; rm -f "$S1" "$S2"
 
 "$ENGINE" --file "$FILE" --mode cnn --start 0 --port $PORT \
@@ -76,5 +78,16 @@ done
 echo
 echo "===== post-seek A/V sync (session 2 vs reference at t=${SEEK_T}s) ====="
 if [ -s "$S2" ]; then
-  python3 "$P/scripts/check_av_sync.py" --reference "$FILE" --stream "$S2" --file-start "$SEEK_T" --dur 8 2>&1 | sed 's/^/  /' | head -12
+  AV_OUT=$(python3 "$P/scripts/check_av_sync.py" --reference "$FILE" --stream "$S2" \
+      --file-start "$SEEK_T" --dur 8 2>&1) && AV_RC=0 || AV_RC=$?
+  printf '%s\n' "$AV_OUT" | sed 's/^/  /' | head -12
+  if [ "$AV_RC" -ne 0 ]; then
+    echo "  A/V sync check FAILED (exit $AV_RC)"
+    FAIL=1
+  fi
+else
+  echo "  session 2 capture is empty, so the post-seek A/V check never ran"
+  FAIL=1
 fi
+
+exit $FAIL

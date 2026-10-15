@@ -1,0 +1,25 @@
+Subtitle appearance — 2026-10-14
+
+Added Subtitles > Subtitle Appearance and a native Settings window with a shared
+CoreText preview, four fonts, 75–150% size, white/warm white/yellow, three outline
+strengths, Reset to Defaults and Apply. Preferences are saved through UserDefaults
+and loaded for the next app launch. The panel states that bitmap subtitles retain
+their original lettering.
+
+The player now composites text after both enhancement passes at output resolution.
+Defaults use the system medium-weight font, a thin black outline and soft shadow.
+Stroke and fill are separate passes so the outline cannot erode the letterforms.
+Cue images are cropped and the cache is bounded to eight cues.
+
+PASS: release build; git diff --check.
+PASS: scripts/check_subtitle_appearance.py — four fonts, size, color, outline,
+output-resolution text, matching visible comparison glyphs, paused application,
+default reset and Off.
+PASS: scripts/check_external_subtitles.py — SRT/VTT/ASS/SSA rendering, embedded
+switching, Off/reselect, paused seek, invalid file and new video.
+Visual check: native NSHostingView render of the settings panel; corrected the
+outline and Retina preview, then confirmed the final view. No screen recording.
+
+Settings button clicks and persistence across an interactive relaunch were not
+automated. VobSub .idx/.sub lettering remains part of its bitmap images; font
+changes require text subtitles such as SRT or VTT.

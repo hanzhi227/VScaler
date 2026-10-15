@@ -21,8 +21,10 @@ resolution is the PTS precision (milliseconds), not the 20 ms envelope step.
 
 Usage:
   check_av_sync.py --reference FILE --stream TS --file-start S [--dur 20]
-  check_av_sync.py ... --expect-fail     # asserts the check REJECTS the input
-Exit code 0 = in sync (or, with --expect-fail, correctly rejected).
+  check_av_sync.py ... --expect-fail     # asserts a measured desync is rejected
+Exit code 0 = in sync; with --expect-fail, 0 only when the check measured a real
+desync and rejected the stream. A stream too weak to judge fails either way,
+because then the desync was never actually detected.
 """
 import argparse
 import json
@@ -164,7 +166,7 @@ def main():
     ap.add_argument("--file-start", type=float, default=0.0)
     ap.add_argument("--dur", type=float, default=20.0)
     ap.add_argument("--expect-fail", action="store_true",
-                    help="return 0 only if the check REJECTS the stream")
+                    help="return 0 only if a real desync is measured and rejected")
     args = ap.parse_args()
 
     fps = video_fps(args.reference)
@@ -174,16 +176,16 @@ def main():
     v_start = first_pts(args.stream, "v:0")
     a_start = first_pts(args.stream, "a:0")
     if v_start is None or a_start is None:
-        print("FAIL: stream is missing video or audio packets")
-        return 0 if args.expect_fail else 1
+        print("FAIL: stream is missing video or audio packets (too weak to judge)")
+        return 1
 
     ref_v = motion_series(args.reference, start=args.file_start, dur=args.dur)
     out_v = motion_series(args.stream)
     ref_a = audio_envelope(args.reference, start=args.file_start, dur=args.dur)
     out_a = audio_envelope(args.stream)
     if len(ref_v) < 20 or len(out_v) < 20 or len(ref_a) < 20 or len(out_a) < 20:
-        print("FAIL: not enough signal to analyse")
-        return 0 if args.expect_fail else 1
+        print("FAIL: not enough signal to analyse (too weak to judge)")
+        return 1
 
     # Content timeline: the reference signals are indexed from --file-start.
     # motion[i] describes the transition into frame i+1, so stamp it with that
@@ -225,7 +227,9 @@ def main():
         print(f"\n{'OK: in sync' if ok else 'FAIL: out of sync'} "
               f"(|{error*1000:.0f} ms| vs {TOLERANCE_S*1000:.0f} ms tolerance)")
     if args.expect_fail:
-        return 0 if not ok else 1
+        # Only a rejection for a measured desync satisfies the negative control;
+        # "could not judge" would mean the desync was never actually detected.
+        return 0 if (strong and not ok) else 1
     return 0 if ok else 1
 
 

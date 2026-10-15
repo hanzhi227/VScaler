@@ -11,17 +11,17 @@ let package = Package(
         .executable(name: "playercheck", targets: ["playercheck"]),
     ],
     dependencies: [
-        .package(path: "../Anime4KMetal"),
+        .package(path: "../VideoUpscaleMetal"),
         .package(path: "../RealESRGANMetal"),
     ],
     targets: [
         .target(
             name: "MacVideoUpscalerCore",
             dependencies: [
-                .product(name: "Anime4KMetal", package: "Anime4KMetal"),
+                .product(name: "VideoUpscaleMetal", package: "VideoUpscaleMetal"),
                 .product(name: "RealESRGANMetal", package: "RealESRGANMetal"),
             ],
-            swiftSettings: [.define("HAVE_ANIME4K_METAL")]
+            swiftSettings: [.define("HAVE_VIDEO_UPSCALE_METAL")]
         ),
         .executableTarget(
             name: "macvideoupscale",

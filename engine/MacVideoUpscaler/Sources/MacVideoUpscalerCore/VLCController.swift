@@ -59,11 +59,22 @@ final class VLCController {
     }
 
     /// First free TCP port at or after `start` on loopback.
+    ///
+    /// The probe socket must be closed before returning: VLC is spawned with
+    /// an `http-port` argument and binds the interface itself, so a socket we
+    /// hold cannot be handed to it. That leaves a small window in which another
+    /// process can claim the port before VLC binds; accepted, because the far
+    /// likelier failure this check prevents is a second VLC binding onto a
+    /// still-live instance from a previous engine session, whose clock would
+    /// then silently answer every read with another stream's state.
     static func freePort(startingAt start: UInt16) -> UInt16 {
         for offset in 0..<20 {
             let port = start &+ UInt16(offset)
             let fd = socket(AF_INET, SOCK_STREAM, 0)
-            if fd < 0 { return start }
+            // A failed socket() only means this candidate cannot be probed;
+            // returning the base port here would skip the remaining ones, any
+            // of which may be free. The last-resort return below covers it.
+            guard fd >= 0 else { continue }
             var addr = sockaddr_in()
             addr.sin_family = sa_family_t(AF_INET)
             addr.sin_port = port.bigEndian
@@ -76,6 +87,8 @@ final class VLCController {
             close(fd)
             if bound == 0 { return port }
         }
+        // No candidate probed free: hand back the base port and let VLC's own
+        // bind failure surface rather than pretend a port was verified.
         return start
     }
 

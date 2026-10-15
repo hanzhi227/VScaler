@@ -77,13 +77,25 @@ final class FFmpegDecoder {
             "-of", "json", url.path,
         ]
         let out = Pipe()
+        let err = Pipe()
         p.standardOutput = out
-        p.standardError = Pipe()
+        p.standardError = err
         p.standardInput = FileHandle.nullDevice   // never touch the controlling terminal
         try p.run()
+        // Drain stderr from a side queue while stdout is read below: on damaged
+        // input ffprobe can write past the 64 KB pipe buffer, and a child
+        // blocked on stderr never closes stdout, so the blocking read would
+        // hang forever and the wait timeout would never apply.
+        DispatchQueue.global(qos: .utility).async {
+            _ = err.fileHandleForReading.readDataToEndOfFile()
+        }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         Subprocess.wait(for: p, timeout: 5)
-        guard p.terminationStatus == 0,
+        // terminationStatus may only be read once the child is gone: the wait
+        // leaves a wedged child running (a 1 s reap window after SIGKILL), and
+        // Foundation raises on a live process. An unkillable probe counts as
+        // "no video stream", which is the outcome the caller can act on.
+        guard !p.isRunning, p.terminationStatus == 0,
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let streams = obj["streams"] as? [[String: Any]], !streams.isEmpty else {
             throw EngineError.decoderFailure("ffprobe found no video stream in \(url.lastPathComponent)")
@@ -207,10 +219,16 @@ final class FFmpegDecoder {
             "-of", "json", url.path,
         ]
         let out = Pipe()
+        let err = Pipe()
         p.standardOutput = out
-        p.standardError = Pipe()
+        p.standardError = err
         p.standardInput = FileHandle.nullDevice   // never touch the controlling terminal
         guard (try? p.run()) != nil else { return [] }
+        // Drain stderr concurrently (see probe): a child blocked on a full
+        // stderr pipe never closes stdout, hanging the read below.
+        DispatchQueue.global(qos: .utility).async {
+            _ = err.fileHandleForReading.readDataToEndOfFile()
+        }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         Subprocess.wait(for: p, timeout: 5)
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -291,8 +309,19 @@ final class FFmpegDecoder {
                 let srcW = quarterTurn ? meta.height : meta.width
                 let srcH = quarterTurn ? meta.width : meta.height
                 let input = sub.externalURL == nil ? 0 : 1
+                // Offsets are chosen in display coordinates, before this canvas is rotated.
+                let dx = sub.horizontalOffset, dy = -sub.verticalOffset
+                let offset: (Double, Double)
+                switch meta.rotation {
+                case 90: offset = (-dy, dx)
+                case 180: offset = (-dx, -dy)
+                case 270: offset = (dy, -dx)
+                default: offset = (dx, dy)
+                }
+                let x = String(format: "%.6f", offset.0)
+                let y = String(format: "%.6f", offset.1)
                 var graph = "[\(input):\(sub.track.index)]scale=\(srcW):\(srcH):flags=bicubic[sub];"
-                    + "[\(video)][sub]overlay=format=auto:eof_action=repeat[v0]"
+                    + "[\(video)][sub]overlay=x=main_w*\(x):y=main_h*\(y):format=auto:eof_action=repeat[v0]"
                 if let rotate = rotateFilter { graph += ";[v0]\(rotate)[v]" }
                 args += [
                     "-filter_complex",

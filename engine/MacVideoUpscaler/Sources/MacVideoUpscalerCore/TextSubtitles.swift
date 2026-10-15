@@ -1,16 +1,15 @@
 import Foundation
 import CoreGraphics
 import CoreText
+import CoreVideo
 
 /// Minimal text-subtitle renderer used because the installed ffmpeg has no
 /// libass (this Homebrew build is compiled without it, so `-vf subtitles=`
 /// does not exist on this machine).
 ///
-/// Cues are extracted with ffmpeg as SRT, rendered once per cue with CoreText
-/// (cached), then blended into the source-resolution frame **before** the 2x
-/// upscale — so subtitle glyphs get the same line reconstruction as the rest
-/// of the picture instead of being stretched as a bitmap over the upscaled
-/// video. ASS/SSA styling is not supported (no libass); plain cues are.
+/// The in-app player blends cached CoreText images at output resolution after
+/// enhancement, so video models never reconstruct or distort the lettering.
+/// ASS/SSA files use their plain text cues; embedded styling is not interpreted.
 final class TextSubtitleRenderer {
     struct Cue {
         let start: Double
@@ -21,14 +20,16 @@ final class TextSubtitleRenderer {
     let cues: [Cue]
     private let sourceWidth: Int
     private let sourceHeight: Int
+    private let style: SubtitleStyle
     private let fontSize: CGFloat
     private var cache: [Int: CGImage] = [:]
 
-    init(cues: [Cue], sourceWidth: Int, sourceHeight: Int) {
+    init(cues: [Cue], sourceWidth: Int, sourceHeight: Int, style: SubtitleStyle = SubtitleStyle()) {
         self.cues = cues
         self.sourceWidth = max(1, sourceWidth)
         self.sourceHeight = max(1, sourceHeight)
-        self.fontSize = max(10, min(CGFloat(self.sourceHeight) * 0.055, 64))
+        self.style = style.normalized
+        self.fontSize = max(10, CGFloat(self.sourceHeight) * 0.045 * CGFloat(style.normalized.size))
     }
 
     // MARK: - Loading
@@ -137,13 +138,13 @@ final class TextSubtitleRenderer {
     private func image(for index: Int) -> CGImage? {
         if let c = cache[index] { return c }
         let cue = cues[index]
-        let font = CTFontCreateWithName("Helvetica-Bold" as CFString, fontSize, nil)
+        let font = style.typeface.font(size: fontSize) as CTFont
         let lines = wrappedLines(cue, font: font)
         guard !lines.isEmpty else { return nil }
 
         let lineHeight = fontSize * 1.22
         let canvasH = Int(lineHeight * CGFloat(lines.count) + fontSize * 0.6)
-        let canvasW = sourceWidth
+        let canvasW = min(sourceWidth, Int(ceil((lines.map { measure($0, font: font) }.max() ?? 0) + fontSize)))
         guard let ctx = CGContext(data: nil, width: canvasW, height: canvasH,
                                   bitsPerComponent: 8, bytesPerRow: canvasW * 4,
                                   space: CGColorSpaceCreateDeviceRGB(),
@@ -152,27 +153,53 @@ final class TextSubtitleRenderer {
         ctx.clear(CGRect(x: 0, y: 0, width: canvasW, height: canvasH))
         ctx.textMatrix = .identity
 
-        let white = CGColor(gray: 1.0, alpha: 1.0)
+        let foreground = style.tint.cgColor
         let black = CGColor(gray: 0.0, alpha: 1.0)
         // Memory row 0 is the top row; CoreText draws with y up, so line 0 sits
         // highest by placing it at the largest y.
         for (i, text) in lines.enumerated() {
             let attrs: [NSAttributedString.Key: Any] = [
                 kCTFontAttributeName as NSAttributedString.Key: font,
-                kCTForegroundColorAttributeName as NSAttributedString.Key: white,
-                kCTStrokeColorAttributeName as NSAttributedString.Key: black,
-                kCTStrokeWidthAttributeName as NSAttributedString.Key: -7.0,
+                kCTForegroundColorAttributeName as NSAttributedString.Key: foreground,
             ]
             let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attrs))
             let width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
             let x = (CGFloat(canvasW) - width) / 2
             let y = CGFloat(canvasH) - lineHeight * CGFloat(i + 1)
+            // Stroke first, then fill: the outline must not eat into the glyphs.
+            var stroke = attrs
+            stroke[kCTStrokeColorAttributeName as NSAttributedString.Key] = black
+            stroke[kCTStrokeWidthAttributeName as NSAttributedString.Key] = style.outline.width
+            let outline = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: stroke))
+            ctx.saveGState()
+            ctx.setShadow(offset: CGSize(width: 0, height: -fontSize * 0.06),
+                          blur: fontSize * 0.10, color: CGColor(gray: 0, alpha: 0.7))
+            ctx.textPosition = CGPoint(x: x, y: y)
+            CTLineDraw(outline, ctx)
+            ctx.restoreGState()
             ctx.textPosition = CGPoint(x: x, y: y)
             CTLineDraw(line, ctx)
         }
         let img = ctx.makeImage()
-        if let img { cache[index] = img }
+        if let img {
+            // Keep recent cues, rather than a whole film's output-resolution glyphs.
+            if cache.count >= 8 { cache.removeAll(keepingCapacity: true) }
+            cache[index] = img
+        }
         return img
+    }
+
+    func previewImage() -> CGImage? {
+        guard let context = CGContext(data: nil, width: sourceWidth, height: sourceHeight,
+                bitsPerComponent: 8, bytesPerRow: sourceWidth * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
+              let buffer = context.data else { return nil }
+        context.setFillColor(CGColor(gray: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: sourceWidth, height: sourceHeight))
+        blend(into: buffer, bytesPerRow: context.bytesPerRow,
+              width: sourceWidth, height: sourceHeight, time: 0)
+        return context.makeImage()
     }
 
     // MARK: - Compositing
@@ -183,16 +210,27 @@ final class TextSubtitleRenderer {
 
     func isActive(at time: Double) -> Bool { activeCueIndex(at: time) != nil }
 
-    /// Blends the active cue into a BGRA frame buffer (source resolution).
+    /// The Metal passes have completed before the CPU writes this output buffer.
+    func blend(into pixelBuffer: CVPixelBuffer, time: Double) {
+        CVPixelBufferLockBaseAddress(pixelBuffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
+        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return }
+        blend(into: base, bytesPerRow: CVPixelBufferGetBytesPerRow(pixelBuffer),
+              width: CVPixelBufferGetWidth(pixelBuffer), height: CVPixelBufferGetHeight(pixelBuffer), time: time)
+    }
+
+    /// Blends the active cue into a BGRA output frame.
     func blend(into buffer: UnsafeMutableRawPointer, bytesPerRow: Int,
                width: Int, height: Int, time: Double) {
         guard let idx = activeCueIndex(at: time), let cg = image(for: idx) else { return }
         guard let data = cg.dataProvider?.data, let src = CFDataGetBytePtr(data) else { return }
         let cgW = cg.width, cgH = cg.height
         let bottomMargin = Int(Double(height) * 0.05)
-        let dstY = height - bottomMargin - cgH
-        guard dstY >= 0, cgW <= width else { return }
-        let x0 = (width - cgW) / 2
+        guard cgH <= height, cgW <= width else { return }
+        let desiredY = height - bottomMargin - cgH - Int(Double(height) * style.verticalOffset)
+        let dstY = min(height - cgH, max(0, desiredY))
+        let desiredX = (width - cgW) / 2 + Int(Double(width) * style.horizontalOffset)
+        let x0 = min(width - cgW, max(0, desiredX))
         for row in 0..<cgH {
             let sRow = UnsafeRawPointer(src + row * cgW * 4).assumingMemoryBound(to: UInt8.self)
             let dRow = (buffer + (dstY + row) * bytesPerRow + x0 * 4).assumingMemoryBound(to: UInt8.self)

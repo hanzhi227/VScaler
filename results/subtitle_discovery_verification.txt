@@ -1,0 +1,23 @@
+Subtitle discovery and multi-selection — 2026-10-14
+
+Opening a video discovers supported subtitle files beside it and recursively in
+subfolders. Discovered tracks appear in Subtitles with relative paths. Discovery
+preserves the user's Off setting. The file picker allows multiple files; loading
+an .idx/.sub pair together deduplicates its tracks, and selecting multiple subtitle
+sets retains all of them. Failed selections preserve the working selection.
+
+PASS: release build and git diff --check.
+PASS: scripts/check_subtitle_discovery.py — nested folders, relative labels,
+uppercase .IDX/.SUB pair, multiple selected files, deduplication, text pixels,
+atomic errors, video scope, and symlink boundaries.
+PASS: scripts/check_external_subtitles.py — SRT/VTT/ASS/SSA rendering, embedded
+tracks, Off/reselection, paused position, seek, invalid replacement and new video.
+PASS: scripts/check_vobsub.py — bitmap rendering, Off, seek into cue/gap, companion
+validation, and new video.
+PASS: scripts/check_pause_resume.py — long pauses, audio/video resume, paused seek,
+and natural EOF after stabilizing the reported playback position during rebuilds.
+PASS: actual Blade Runner movie — automatically discovered all three English
+VobSub tracks from its Subs folder without a manual subtitle selection.
+
+The native picker was configured for multiple selection; clicks in that picker
+were not automated. Hidden files/packages and symlinked folders are not scanned.

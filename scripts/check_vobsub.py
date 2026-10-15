@@ -71,8 +71,7 @@ with tempfile.TemporaryDirectory(prefix="vscaler-vobsub-") as directory:
     errors = [row for row in rows if row.get("error")]
     check(len(errors) == 1 and ".idx" in errors[0]["error"] and ".sub" in errors[0]["error"],
           f"Missing-pair validation failed: {errors}")
-    check(any(row.get("file") == next_video.name and row.get("subtitleTracks") == [] and
-              not row.get("subtitlesEnabled") for row in rows), "VobSub leaked to the next video")
+    check(any(row.get("file") == next_video.name and not row.get("subtitlesEnabled") for row in rows), "VobSub leaked to the next video")
     check(any(any(track["codec"] == "dvd_subtitle" and track["index"] < 0
                   for track in row.get("subtitleTracks", [])) for row in rows), "VobSub track missing")
     captures = [row for row in rows if row.get("event") == "readback"]

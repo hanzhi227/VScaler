@@ -413,9 +413,12 @@ def stage_speed(chosen: str, alts: list[str], out: dict):
     up32 = Upscaler(chosen, "cpu", pad_multiple=32)
     a = up0.upscale(rgb).astype(np.int16)
     b = up32.upscale(rgb).astype(np.int16)
+    diff = int(np.abs(a - b).max())
     probe["arbitrary_size_output"] = list(up0.run_tensor(frame_to_tensor(rgb, up0.input_dtype)).shape)
-    probe["pad_multiple_32_max_abs_diff"] = int(np.abs(a - b).max())
-    probe["padding_required"] = False
+    probe["pad_multiple_32_max_abs_diff"] = diff
+    # Padding is required when 32-multiple padding changes the output beyond 8-bit
+    # rounding noise, so arbitrary-size input is not safe for this model.
+    probe["padding_required"] = bool(diff > 1)
     res["_padding_probe"] = probe
     # CoreML compute-unit sweep + ANE power evidence (chosen model only)
     cu_res = {"ane_idle_power_state": ane_power_state(), "configs": {}}

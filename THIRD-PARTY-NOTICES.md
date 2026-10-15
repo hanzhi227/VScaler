@@ -7,9 +7,9 @@ weights embedded in the source and the external tools used by the app.
 
 ### Anime4K v3.2 (MIT)
 
-`engine/Anime4KMetal` is a Metal port of bloc97's Anime4K v3.2
+`engine/VideoUpscaleMetal` is a Metal port of bloc97's Anime4K v3.2
 `Upscale_CNN_x2_M` network (plus its denoise variant). The weights embedded in
-`Sources/Anime4KMetal/CNNWeights.swift` are extracted from upstream's
+`Sources/VideoUpscaleMetal/CNNWeights.swift` are extracted from upstream's
 `Anime4K_Upscale_CNN_x2_M.glsl` by `Scripts/extract_weights.py`.
 
 - Upstream: <https://github.com/bloc97/Anime4K>

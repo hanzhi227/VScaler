@@ -47,10 +47,13 @@ WORK="${TMPDIR:-/tmp}/esrgan-pair-grid"
 rm -rf "$WORK"; mkdir -p "$WORK"/{src,bilinear,animevideov3,general-x4v3}
 
 # Two lines of plain numbers rather than CSV: this ffmpeg build rejects the
-# `-of csv=p=0:s=' '` option string.
-readarray -t DIMS < <("$FFPROBE" -v error -select_streams v:0 \
+# `-of csv=p=0:s=' '` option string. A while-read loop instead of readarray,
+# which does not exist in the stock macOS bash 3.2.
+W=""; H=""
+while IFS= read -r dim; do
+  if [ -z "$W" ]; then W="$dim"; else H="$dim"; fi
+done < <("$FFPROBE" -v error -select_streams v:0 \
   -show_entries stream=width,height -of default=nw=1:nk=1 "$FILE")
-W="${DIMS[0]:-}"; H="${DIMS[1]:-}"
 [ -n "$W" ] && [ -n "$H" ] || { echo "could not read the size of $FILE" >&2; exit 1; }
 if [ $((W * 4)) -gt 4096 ] || [ $((H * 4)) -gt 2304 ]; then
   echo "$FILE is ${W}x${H}: 4x is $((W * 4))x$((H * 4)), past the encoder's 4096x2304" >&2

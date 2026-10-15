@@ -7,7 +7,7 @@ import MetalFX
 ///
 /// It is the only one of the shortlisted general-video upscalers that can run in
 /// a live player: measured 0.33 ms for 640x480 -> 1280x960 and 0.99 ms for
-/// 1920x1080 -> 3840x2160 on an M5 Pro, against 3.81 ms for the Anime4K CNN at
+/// 1920x1080 -> 3840x2160 on an M5 Pro, against 3.81 ms for the CNN at
 /// the latter size. It also takes the input and output geometry directly, so one
 /// encode does the whole magnification — the 4x here is a single pass rather than
 /// two chained 2x passes, which measured better on both axes (acutance 1.94x vs

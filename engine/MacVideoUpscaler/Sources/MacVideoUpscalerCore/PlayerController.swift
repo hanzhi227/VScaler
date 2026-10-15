@@ -6,63 +6,6 @@ import CoreMedia
 import Metal
 import os
 
-/// The last few source frames of a session, newest last.
-///
-/// Once a frame has been handed to the renderer the player no longer reads it,
-/// so re-rendering one — which is what lets the comparison respond while paused
-/// — needs its *source* kept. The display layer holds up to `bufferFrames`
-/// frames at once, so the frame on screen is at most that many behind the newest
-/// one produced; the ring is one larger, and it is only built once the
-/// comparison has been used, so ordinary playback pays nothing for it.
-///
-/// Slots are addressed by frame index, so the ring is a sliding window rather
-/// than a queue: index `i` always lives in slot `i % capacity`, and the window
-/// `oldest...newest` is what may be read back. Owned by the video thread.
-final class SourceRing {
-    private let device: MTLDevice
-    private let width: Int
-    private let height: Int
-    let capacity: Int
-    private var slots: [MTLTexture?]
-    /// The frame indices currently held.
-    private(set) var oldest = 0
-    private(set) var newest = -1
-
-    init(device: MTLDevice, width: Int, height: Int, capacity: Int) {
-        self.device = device
-        self.width = width
-        self.height = height
-        self.capacity = max(2, capacity)
-        self.slots = Array(repeating: nil, count: max(2, capacity))
-    }
-
-    var isEmpty: Bool { newest < oldest }
-
-    /// The texture frame `index` is uploaded into, which is also that frame's
-    /// source for the scalers. Frames arrive in increasing index order.
-    func slot(for index: Int) -> MTLTexture? {
-        let i = index % capacity
-        if slots[i] == nil {
-            let d = MTLTextureDescriptor.texture2DDescriptor(
-                pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false)
-            d.usage = [.shaderRead]
-            d.storageMode = .shared        // written from the decoder's staging buffer
-            slots[i] = device.makeTexture(descriptor: d)
-        }
-        if index > newest { newest = index }
-        oldest = max(oldest, newest - capacity + 1)
-        return slots[i]
-    }
-
-    /// The source of frame `index`, or nil when it is no longer (or not yet)
-    /// held. Slots below `oldest` are stale — they hold a frame one lap older —
-    /// so they are refused rather than returned.
-    func texture(at index: Int) -> MTLTexture? {
-        guard index >= oldest, index <= newest else { return nil }
-        return slots[index % capacity]
-    }
-}
-
 /// In-app playback controller: decode (ffmpeg) -> Metal upscale -> display layer,
 /// with audio on a shared render clock.
 ///
@@ -90,6 +33,7 @@ public final class PlayerController {
         public var scaleFactor: UpscaleFactor = .x2
         public var burnSubtitles = false
         public var subtitleStreamIndex = 0
+        public var subtitleStyle = SubtitleStyle()
         /// How much *rendered* video to keep ahead of the clock, in seconds.
         ///
         /// This is the read-ahead the player can actually use. The producer renders
@@ -140,9 +84,6 @@ public final class PlayerController {
 
     private let ctx: MetalContext
     private let player: EmbeddedPlayer
-    /// The comparison compositor, built once because the kernel depends only on
-    /// the device, not on the frame geometry.
-    private let comparison: SplitCompositor?
     /// Whether the two halves are being shown. It lives on the controller rather
     /// than in a `Session`, so it survives seeks and rebuilds.
     private let compareFlag = OSAllocatedUnfairLock(initialState: false)
@@ -205,23 +146,25 @@ public final class PlayerController {
     private var probedFile: URL?
     private var audioTracks: [AudioTrack] = []
     private var subtitleTracks: [SubtitleTrack] = []
-    private var subtitleFile: (url: URL, cues: [TextSubtitleRenderer.Cue]?, tracks: [SubtitleTrack])?
+    private struct ExternalSubtitle {
+        let url: URL
+        let cues: [TextSubtitleRenderer.Cue]?
+        let track: SubtitleTrack?
+    }
+    private var subtitleFiles: [ExternalSubtitle] = []
 
     public init(config: Config = Config()) throws {
         signal(SIGPIPE, SIG_IGN)
         self.config = config
         let context = try MetalContext()
         self.ctx = context
-        // A missing kernel is not fatal: the rest of the player works, and the
-        // comparison simply reports itself as unavailable.
-        self.comparison = try? SplitCompositor(ctx: context)
         self.player = EmbeddedPlayer(audioEnabled: config.audioEnabled, volume: config.volume)
         sessionQueue.setSpecific(key: Self.sessionQueueKey, value: ())
         status.update { $0.state = .idle }
         // Dragging the divider on the picture changes the same split the slider
         // does; both end up in `setCompareSplit`.
         player.splitFractionProvider = { [weak self] in
-            guard let self, self.compareFlag.value, self.comparison != nil else { return nil }
+            guard let self, self.compareFlag.value else { return nil }
             return self.compareSplit.value
         }
         player.onSplitDrag = { [weak self] fraction in
@@ -237,9 +180,7 @@ public final class PlayerController {
     public func makeView() -> NSView { player.makeView() }
 
     /// The frame the renderer is showing, as a copy, or nil when nothing has been
-    /// presented yet. Diagnostic: the paused redraw's real effect is a change to
-    /// what is on screen, which is not the same as what was rendered last, so a
-    /// harness needs to read the presented image to check it.
+    /// presented yet. Reports the full enhancement image, before the view's wipe mask.
     public var displayedFrame: CVPixelBuffer? { player.displayedFrame }
 
     /// Invoked when the viewer clicks the picture, on the main thread. The app
@@ -287,9 +228,6 @@ public final class PlayerController {
         /// Session note (scale clamp / anamorphic) to restore after a transient
         /// message such as a failed mode switch.
         let baseMessage: String
-        /// How many recent source frames the paused redraw may keep (video
-        /// thread only; see `SourceRing`).
-        let recentFrames: Int
         /// Rendered frames waiting to be shown: the producer fills it, the feeder
         /// drains it into the display layer. See `FrameStore`.
         let store: FrameStore
@@ -297,8 +235,7 @@ public final class PlayerController {
         /// initial wait or after a rebuffer, and deliberately the same number both
         /// times so the first wait and every later one feel alike.
         let resumeFrames: Int
-        /// The next frame index the feeder owes the layer. Shared because the
-        /// paused redraw re-queues frames itself and has to move this past them.
+        /// The next paired frame the feeder owes the two display layers.
         let nextToFeed = OSAllocatedUnfairLock(initialState: 0)
         /// Whether playback is currently held because the store ran dry. Read by
         /// the status and the UI; written only by the feeder.
@@ -315,19 +252,7 @@ public final class PlayerController {
         var leftScaler: FrameScaler?
         /// The model `leftScaler` was built for, so a request is only built once.
         var leftKind: ScalerKind?
-        /// The left model's render target, at the output geometry.
-        var leftScratch: MTLTexture?
-        /// Recent source frames, so the frame on screen can be re-rendered after
-        /// a setting changes while paused. Nil until the comparison is used.
-        var sources: SourceRing?
-        /// Bumped by the control thread when a setting that only changes how the
-        /// picture looks is altered. The video thread renders the frozen frame
-        /// again whenever it sees a generation it has not rendered yet.
-        let redrawWanted = OSAllocatedUnfairLock(initialState: 0)
-        /// The generation the picture reflects. While playing, every produced
-        /// frame acknowledges the generation it was rendered under.
-        let redrawDone = OSAllocatedUnfairLock(initialState: 0)
-
+        let comparisonFailure = OSAllocatedUnfairLock<String?>(initialState: nil)
         let frameIndex = OSAllocatedUnfairLock(initialState: 0)
         let audioFrames = OSAllocatedUnfairLock<Int64>(initialState: 0)
         let videoPrimed = OSAllocatedUnfairLock(initialState: false)
@@ -349,7 +274,7 @@ public final class PlayerController {
              srcTexture: MTLTexture, staging: MTLBuffer, pool: CVPixelBufferPool,
              aux: CFDictionary, textureCache: CVMetalTextureCache,
              scaler: FrameScaler, kind: ScalerKind, factor: UpscaleFactor,
-             baseMessage: String, recentFrames: Int,
+             baseMessage: String,
              store: FrameStore, resumeFrames: Int) {
             self.id = id
             self.startAt = startAt
@@ -368,7 +293,6 @@ public final class PlayerController {
             self.kind = OSAllocatedUnfairLock(initialState: kind)
             self.factor = factor
             self.baseMessage = baseMessage
-            self.recentFrames = recentFrames
             self.store = store
             self.resumeFrames = resumeFrames
         }
@@ -376,12 +300,12 @@ public final class PlayerController {
 
     public func open(file: URL, kind: ScalerKind, startAt: Double = 0) throws {
         lock.lock()
-        if currentFile != file, subtitleFile != nil {
+        if currentFile != file, !subtitleFiles.isEmpty {
             if config.subtitleStreamIndex >= subtitleTracks.count {
                 config.burnSubtitles = false
                 config.subtitleStreamIndex = 0
             }
-            subtitleFile = nil
+            subtitleFiles = []
         }
         currentFile = file
         self.kind = kind
@@ -471,22 +395,19 @@ public final class PlayerController {
         // Subtitle burn is applied at decode time, so resolve it before starting.
         var subtitleLabel = "off"
         var burn: SubtitleBurn?
-        var textRenderer: TextSubtitleRenderer?
+        var subtitleCues: [TextSubtitleRenderer.Cue]?
         if config.burnSubtitles {
-            if let subtitleFile, config.subtitleStreamIndex >= subtitleTracks.count {
+            let externalIndex = config.subtitleStreamIndex - subtitleTracks.count
+            if subtitleFiles.indices.contains(externalIndex) {
+                let subtitleFile = subtitleFiles[externalIndex]
                 let meta = (try? FFmpegDecoder(url: file))?.meta
                 if let cues = subtitleFile.cues {
-                    textRenderer = TextSubtitleRenderer(cues: cues,
-                                                        sourceWidth: meta?.width ?? 1920,
-                                                        sourceHeight: meta?.height ?? 1080)
-                } else {
-                    let index = config.subtitleStreamIndex - subtitleTracks.count
-                    if subtitleFile.tracks.indices.contains(index) {
-                        burn = SubtitleBurn(track: subtitleFile.tracks[index],
-                                            sourceWidth: meta?.width ?? 0,
-                                            sourceHeight: meta?.height ?? 0,
-                                            externalURL: subtitleFile.url)
-                    }
+                    subtitleCues = cues
+                } else if let track = subtitleFile.track {
+                    burn = SubtitleBurn(track: track,
+                                        sourceWidth: meta?.width ?? 0,
+                                        sourceHeight: meta?.height ?? 0,
+                                        externalURL: subtitleFile.url)
                 }
                 subtitleLabel = subtitleFile.url.lastPathComponent
             } else if let track = subtitleTracks.first(where: { $0.ordinal == config.subtitleStreamIndex }) ?? subtitleTracks.first {
@@ -496,8 +417,8 @@ public final class PlayerController {
                                         sourceHeight: probe?.meta.height ?? 0)
                     subtitleLabel = "\(track.codec) #\(track.index) (bitmap)"
                 } else {
-                    textRenderer = TextSubtitleRenderer.load(url: file, ordinal: track.ordinal)
-                    subtitleLabel = textRenderer == nil
+                    subtitleCues = TextSubtitleRenderer.loadCues(url: file, ordinal: track.ordinal)
+                    subtitleLabel = subtitleCues == nil
                         ? "\(track.codec) #\(track.index): no cues found"
                         : "\(track.codec) #\(track.index) (native text render)"
                 }
@@ -511,6 +432,10 @@ public final class PlayerController {
             config.audioStreamIndex = 0
         }
         let hasAudio = config.audioEnabled && !audioTracks.isEmpty
+
+        let position = config.subtitleStyle.normalized
+        burn?.horizontalOffset = position.horizontalOffset
+        burn?.verticalOffset = position.verticalOffset
 
         let dec: FFmpegDecoder
         do {
@@ -538,6 +463,9 @@ public final class PlayerController {
         // the scaler is a 1:1 copy.
         let ow = kind.magnifies ? sw * eff.rawValue : sw
         let oh = kind.magnifies ? sh * eff.rawValue : sh
+        let textRenderer = subtitleCues.map {
+            TextSubtitleRenderer(cues: $0, sourceWidth: ow, sourceHeight: oh, style: config.subtitleStyle)
+        }
 
         var note = ""
         if !kind.magnifies {
@@ -594,7 +522,7 @@ public final class PlayerController {
         // `bufferBudgetBytes` and floored at `minBufferFrames`. Whichever limit
         // binds first wins, so a 4K output gets a shorter buffer than 1080p out of
         // the same budget rather than the same number of frames at 3x the memory.
-        let frameBytes = ow * oh * 4
+        let frameBytes = ow * oh * 4 * 2 // two full frames for the presentation-time wipe
         let bySeconds = Int((config.bufferSeconds * max(dec.meta.fps, 1)).rounded(.up))
         let byBudget = config.bufferBudgetBytes / max(1, frameBytes)
         let capacity = max(config.minBufferFrames, min(bySeconds, byBudget))
@@ -606,15 +534,8 @@ public final class PlayerController {
         // The pool has to be able to hand out every frame the store holds, plus
         // the two the display layer keeps in its own queue, or the producer would
         // block on allocation instead of on the store.
-        let depth = capacity + 4
+        let depth = (capacity + 4) * 2
         let aux: [String: Any] = [kCVPixelBufferPoolAllocationThresholdKey as String: depth]
-
-        // How much source history the paused redraw may keep (see `SourceRing`):
-        // one more than the frames the renderer can be holding, so the frame on
-        // screen is always still available, capped by bytes — a source big enough
-        // to make the ring cost more than the frame buffers it exists to serve
-        // gets fewer entries instead of a bigger budget.
-        let recentFrames = max(2, min(depth + 1, (64 << 20) / max(1, sw * sh * 4)))
 
         // Display shape: an anamorphic source keeps its DAR even though the raster
         // is uniformly scaled, so the UI lays the surface out at that ratio.
@@ -640,7 +561,7 @@ public final class PlayerController {
                         textRenderer: textRenderer, srcTexture: srcTex, staging: staging,
                         pool: pool, aux: aux as CFDictionary, textureCache: cache,
                         scaler: scaler, kind: kind, factor: eff, baseMessage: baseMessage,
-                        recentFrames: recentFrames, store: store, resumeFrames: resumeFrames)
+                        store: store, resumeFrames: resumeFrames)
         session = s
 
         status.update {
@@ -824,12 +745,8 @@ public final class PlayerController {
     /// The position the viewer is actually at: the session's content offset plus
     /// the render clock's elapsed time.
     public var playbackSeconds: Double {
-        lock.lock()
-        let origin = startAt
-        let live = session != nil && !stopFlag
-        lock.unlock()
-        guard live else { return origin }
-        return origin + max(0, player.currentSeconds)
+        lock.lock(); defer { lock.unlock() }
+        return requestedPositionLocked()
     }
 
     public func seek(to seconds: Double) {
@@ -915,11 +832,11 @@ public final class PlayerController {
         if let refusal {
             // Same shape as a failed build: say why, keep playing what is playing.
             status.update { $0.message = refusal }
-            viewSettingChanged()
             return
         }
         if geometryChanges {
             restart(at: pos + 0.1)
+            return
         } else {
             // Recorded as a *request*; `kind` is only updated once the new scaler
             // has actually been built, so a failed build is reported instead of
@@ -945,11 +862,15 @@ public final class PlayerController {
     public var compareSplitFraction: Double { compareSplit.value }
 
     public func setCompare(_ on: Bool) {
-        guard comparison != nil else {
-            status.update {
-                $0.comparing = false
-                $0.message = "Comparison view unavailable: the split kernel did not build."
-            }
+        lock.lock()
+        let s = session
+        let currentKind = s?.kind.value ?? kind
+        lock.unlock()
+        let refusal = s?.comparisonFailure.value
+            ?? (!currentKind.magnifies ? "Comparison needs an enhancement mode that scales." : nil)
+            ?? (!compareLeft.value.magnifies ? "The left comparison model must scale the video." : nil)
+        if on, let refusal {
+            status.update { $0.message = refusal }
             return
         }
         compareFlag.value = on
@@ -958,44 +879,46 @@ public final class PlayerController {
             $0.compareLeftMode = compareLeft.value.displayName
             $0.compareSplit = compareSplit.value
         }
-        viewSettingChanged()
+        updateComparisonPresentation()
     }
 
-    /// Choose the model shown on the left of the divider. `.bypass` is the plain
-    /// bilinear upscale — the original video as any other player would show it.
     public func setCompareLeft(_ kind: ScalerKind) {
+        guard compareLeft.value != kind else { return }
         compareLeft.value = kind
         status.update { $0.compareLeftMode = kind.displayName }
-        viewSettingChanged()
+        // A different model needs new pixels; moving the wipe never does.
+        lock.lock()
+        let position = comparisonPositionLocked()
+        let hasSession = session != nil
+        lock.unlock()
+        if hasSession { restart(at: position) }
     }
 
-    /// Move the divider: 0 shows only the enhancement, 1 only the left model.
     public func setCompareSplit(_ fraction: Double) {
+        guard fraction.isFinite else { return }
         let clamped = min(max(fraction, 0), 1)
         compareSplit.value = clamped
         status.update { $0.compareSplit = clamped }
-        viewSettingChanged()
+        updateComparisonPresentation()
     }
 
-    /// A setting changed that only affects how the current frame looks: the
-    /// comparison, its divider, or the enhancement model.
-    ///
-    /// While playing, the next frame the producer renders uses the new value and
-    /// nothing has to happen. While paused the producer is parked, so it is woken
-    /// to render the frame on screen again — that is what makes the comparison
-    /// usable on a stopped frame, which is the only way to compare two models on
-    /// one instant properly. Requests made while the producer is busy with a
-    /// rebuild are dropped: that session renders with the new value anyway.
+    private func updateComparisonPresentation() {
+        player.setComparison(enabled: compareFlag.value, fraction: compareSplit.value)
+    }
+
     private func viewSettingChanged() {
         lock.lock()
-        let s = session
         let parked = pausedFlag && pauseRequested
+        let position = comparisonPositionLocked()
         lock.unlock()
-        guard let s, parked else { return }
-        s.redrawWanted.value &+= 1
-        lock.lock()
-        lock.broadcast()          // the producer is waiting on this condition
-        lock.unlock()
+        if parked { restart(at: position) }
+    }
+
+    private func comparisonPositionLocked() -> Double {
+        let position = requestedPositionLocked()
+        guard pauseRequested, let s = session else { return position }
+        let frame = floor(max(0, position - s.startAt) * max(s.fps, 1))
+        return s.startAt + frame / max(s.fps, 1)
     }
 
     public func setScaleFactor(_ factor: UpscaleFactor) {
@@ -1033,49 +956,108 @@ public final class PlayerController {
         restart(at: pos + 0.1)
     }
 
+    public func setSubtitleStyle(_ style: SubtitleStyle) {
+        lock.lock()
+        let normalized = style.normalized
+        let changed = config.subtitleStyle != normalized
+        let moved = config.subtitleStyle.horizontalOffset != normalized.horizontalOffset
+            || config.subtitleStyle.verticalOffset != normalized.verticalOffset
+        config.subtitleStyle = normalized
+        let redraw = changed && (session?.textRenderer != nil
+            || (moved && session != nil && config.burnSubtitles))
+        let pos = comparisonPositionLocked()
+        if redraw { pendingSeek = pos }
+        lock.unlock()
+        if redraw { restart(at: pos) }
+    }
+
     public func setSubtitleTrack(_ ordinal: Int) { setSubtitles(true, streamIndex: max(0, ordinal)) }
 
-    /// Loads off the UI thread; a failed replacement leaves the current subtitles intact.
+    /// A failed selection leaves the current subtitles intact, including multi-file loads.
     public func loadSubtitleFile(_ url: URL, for video: URL) throws {
-        lock.lock()
-        let current = currentFile
-        lock.unlock()
-        guard current != nil else {
-            throw CocoaError(.fileReadUnknown, userInfo: [NSLocalizedDescriptionKey: "Open a video before loading subtitles."])
-        }
-        var source = url
-        var cues: [TextSubtitleRenderer.Cue]?
-        var tracks: [SubtitleTrack] = []
-        let bitmap = ["idx", "sub"].contains(url.pathExtension.lowercased())
-        if url.isFileURL && bitmap {
-            source = url.deletingPathExtension().appendingPathExtension("idx")
-            let data = url.deletingPathExtension().appendingPathExtension("sub")
-            guard FileManager.default.isReadableFile(atPath: source.path),
-                  FileManager.default.isReadableFile(atPath: data.path) else {
-                throw CocoaError(.fileReadNoSuchFile, userInfo: [NSLocalizedDescriptionKey:
-                    "VobSub needs both \(source.lastPathComponent) and \(data.lastPathComponent) in the same folder. Select either file once both are present."])
-            }
-            tracks = FFmpegDecoder.probeSubtitles(url: source).filter(\.bitmap)
-        } else if url.isFileURL {
-            cues = TextSubtitleRenderer.loadCues(url: url)
-        }
-        guard cues != nil || !tracks.isEmpty else {
-            throw CocoaError(.fileReadCorruptFile, userInfo: [NSLocalizedDescriptionKey:
-                "Could not read subtitles from \(url.lastPathComponent). Choose a text subtitle file or a matching VobSub .idx/.sub pair."])
+        try loadSubtitleFiles([url], for: video)
+    }
+
+    public func loadSubtitleFiles(_ urls: [URL], for video: URL) throws {
+        guard !urls.isEmpty else { return }
+        var loaded: [ExternalSubtitle] = []
+        var seen = Set<URL>()
+        for url in urls {
+            let files = try Self.readSubtitleFile(url)
+            guard let source = files.first?.url, seen.insert(source).inserted else { continue }
+            loaded.append(contentsOf: files)
         }
         lock.lock()
-        guard current == video, currentFile == video else {
+        guard currentFile == video else {
             lock.unlock()
-            throw CocoaError(.fileReadUnknown, userInfo: [NSLocalizedDescriptionKey: "The video changed while loading subtitles. Select the subtitle file again."])
+            throw CocoaError(.fileReadUnknown, userInfo: [NSLocalizedDescriptionKey:
+                "The video changed while loading subtitles. Select the subtitle files again."])
         }
         refreshTrackListsLocked()
-        subtitleFile = (source, cues, tracks)
+        for source in seen { subtitleFiles.removeAll { $0.url == source } }
+        let firstIndex = subtitleFiles.count
+        subtitleFiles.append(contentsOf: loaded)
         config.burnSubtitles = true
-        config.subtitleStreamIndex = subtitleTracks.count
+        config.subtitleStreamIndex = subtitleTracks.count + firstIndex
         let pos = requestedPositionLocked()
         pendingSeek = pos
         lock.unlock()
         restart(at: pos)
+    }
+
+    private static func readSubtitleFile(_ url: URL) throws -> [ExternalSubtitle] {
+        let ext = url.pathExtension.lowercased()
+        guard url.isFileURL, ["srt", "vtt", "ass", "ssa", "idx", "sub"].contains(ext) else {
+            throw CocoaError(.fileReadUnsupportedScheme)
+        }
+        if ["idx", "sub"].contains(ext) {
+            let folder = url.deletingLastPathComponent()
+            let stem = url.deletingPathExtension().lastPathComponent
+            let siblings = (try? FileManager.default.contentsOfDirectory(at: folder,
+                includingPropertiesForKeys: nil)) ?? []
+            func companion(_ ext: String) -> URL? {
+                let matches = siblings.filter {
+                    $0.pathExtension.lowercased() == ext
+                        && $0.deletingPathExtension().lastPathComponent.caseInsensitiveCompare(stem) == .orderedSame
+                        && FileManager.default.isReadableFile(atPath: $0.path)
+                }
+                return matches.first { $0.deletingPathExtension().lastPathComponent == stem } ?? matches.first
+            }
+            guard let source = companion("idx"), companion("sub") != nil else {
+                throw CocoaError(.fileReadNoSuchFile, userInfo: [NSLocalizedDescriptionKey:
+                    "VobSub needs both \(stem).idx and \(stem).sub in the same folder. Select either file or both once they are present."])
+            }
+            let tracks = FFmpegDecoder.probeSubtitles(url: source).filter(\.bitmap)
+            if !tracks.isEmpty {
+                return tracks.map { ExternalSubtitle(url: source.standardizedFileURL, cues: nil, track: $0) }
+            }
+        } else if let cues = TextSubtitleRenderer.loadCues(url: url) {
+            return [ExternalSubtitle(url: url.standardizedFileURL, cues: cues, track: nil)]
+        }
+        throw CocoaError(.fileReadCorruptFile, userInfo: [NSLocalizedDescriptionKey:
+            "Could not read subtitles from \(url.lastPathComponent). Choose a text subtitle file or a matching VobSub .idx/.sub pair."])
+    }
+
+    private static func discoverSubtitleFiles(for video: URL) -> [ExternalSubtitle] {
+        let folder = video.deletingLastPathComponent()
+        guard let enumerator = FileManager.default.enumerator(at: folder,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return [] }
+        var candidates: [URL] = []
+        for case let url as URL in enumerator {
+            guard ["srt", "vtt", "ass", "ssa", "idx"].contains(url.pathExtension.lowercased()),
+                  let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
+                  values.isRegularFile == true, values.isSymbolicLink != true else { continue }
+            candidates.append(url)
+        }
+        let stem = video.deletingPathExtension().lastPathComponent.lowercased()
+        candidates.sort {
+            let leftMatch = $0.deletingPathExtension().lastPathComponent.lowercased().hasPrefix(stem)
+            let rightMatch = $1.deletingPathExtension().lastPathComponent.lowercased().hasPrefix(stem)
+            if leftMatch != rightMatch { return leftMatch }
+            return $0.path.localizedStandardCompare($1.path) == .orderedAscending
+        }
+        return candidates.flatMap { (try? readSubtitleFile($0)) ?? [] }
     }
 
     public var availableAudioTracks: [TrackInfo] {
@@ -1149,12 +1131,7 @@ public final class PlayerController {
 
     private func videoLoop(_ s: Session) {
         while true {
-            let wake = waitForWork(s)
-            if wake == .ended { break }
-            if wake == .pausedRedraw { redrawPausedFrame(s); continue }
-            // Read before rendering: a setting changed after this point is not in
-            // the frame about to be queued, and must be picked up by a redraw.
-            let generation = s.redrawWanted.value
+            if parkIfNeededOrEnded(s) { break }
 
             // The store is the backpressure now, not the display layer: the
             // producer runs ahead until the buffer is full, and that lead is the
@@ -1173,14 +1150,8 @@ public final class PlayerController {
             }
 
             let meta = s.decoder.meta
-            if let renderer = s.textRenderer {
-                let t = s.startAt + Double(s.frameIndex.value) / max(s.fps, 1)
-                renderer.blend(into: s.staging.contents(), bytesPerRow: meta.width * 4,
-                               width: meta.width, height: meta.height, time: t)
-            }
-
             let region = MTLRegionMake2D(0, 0, s.srcTexture.width, s.srcTexture.height)
-            let source = sourceTexture(for: s, index: s.frameIndex.value)
+            let source = s.srcTexture
             source.replace(region: region, mipmapLevel: 0,
                            withBytes: s.staging.contents(), bytesPerRow: meta.width * 4)
 
@@ -1198,22 +1169,19 @@ public final class PlayerController {
                 break
             }
 
-            // Comparison overlay: the right half of the frame is the enhancement
-            // that was just rendered; the left half is a second model composited
-            // over it, so the two can be seen against each other. Everything is
-            // ordered after the scale above, and the output geometry is unchanged.
-            if compareFlag.value, let cmp = comparison {
-                do {
-                    try applyComparison(cmp, to: s, source: source, out: out)
-                } catch {
-                    // A Metal failure here says nothing about the session, so the
-                    // picture goes back to normal instead of the run being killed.
-                    compareFlag.value = false
-                    status.update {
-                        $0.comparing = false
-                        $0.message = "Comparison view stopped: \(error)"
-                    }
-                }
+            // Keep the reference as a full frame, even while the wipe is hidden,
+            // so enabling comparison on a paused frame needs no decoder work.
+            var left: Output?
+            do {
+                left = try renderComparison(to: s, source: source)
+            } catch {
+                disableComparison(s, message: "Comparison view stopped: \(error)")
+            }
+
+            if let renderer = s.textRenderer {
+                let time = s.startAt + Double(s.frameIndex.value) / max(s.fps, 1)
+                renderer.blend(into: out.pb, time: time)
+                if let left { renderer.blend(into: left.pb, time: time) }
             }
 
             let idx = s.frameIndex.value
@@ -1225,7 +1193,8 @@ public final class PlayerController {
             // layer: the feeder owns the handoff, and this frame may sit here for
             // as long as the buffer is deep.
             if !s.store.push(FrameStore.Frame(index: idx, pb: out.pb,
-                                              cvTexture: out.cvTexture, texture: out.texture)) {
+                                              cvTexture: out.cvTexture, texture: out.texture,
+                                              leftPB: left?.pb, leftCVTexture: left?.cvTexture)) {
                 // Impossible unless the store closed or the wait above was raced
                 // by a close; dropping the frame would leave a hole the feeder
                 // stalls on for the rest of the session.
@@ -1235,7 +1204,6 @@ public final class PlayerController {
             // "Primed" now means the buffer holds enough to start, not that one
             // frame was queued — `primeAndStart` waits on it.
             if s.store.count >= s.resumeFrames { s.videoPrimed.value = true }
-            s.redrawDone.value = generation
             postStatus(s)
         }
         // The end of the source, or a failure. Completion is reported by the
@@ -1261,10 +1229,6 @@ public final class PlayerController {
     /// frames and no more (`FrameStore`), so there was nowhere for a lead to live.
     private func feedLoop(_ s: Session) {
         while true {
-            // Read the index only after the park below: the paused redraw moves
-            // it past the frames it re-queued itself and discards whatever else
-            // the feeder may hold, so an index read before parking is stale on
-            // wake.
             if parkFeederIfNeededOrEnded(s) { break }
             if s.store.isClosed { break }
             let next = s.nextToFeed.value
@@ -1301,14 +1265,6 @@ public final class PlayerController {
                 continue
             }
             if !waitForLayerReady(s) { break }
-            // Parking in the wait above while paused lets the paused redraw run:
-            // it discards this frame and moves `nextToFeed` past it, so the held
-            // frame is stale. Drop it and start over rather than enqueueing it,
-            // which would show a frame rendered under the settings the viewer
-            // just changed and drag the counter backwards below the redraw's
-            // mark, leaving its re-queued frames to be fed a second time.
-            guard s.nextToFeed.value == next else { continue }
-
             guard let sample = player.makeVideoSample(pixelBuffer: frame.pb,
                                                       pts: Double(next) / max(s.fps, 1),
                                                       fps: s.fps) else {
@@ -1316,7 +1272,10 @@ public final class PlayerController {
                 s.nextToFeed.value = next + 1
                 continue
             }
-            if player.enqueueVideo(sample) {
+            guard let leftSample = player.makeVideoSample(pixelBuffer: frame.leftPB ?? frame.pb,
+                                                          pts: Double(next) / max(s.fps, 1),
+                                                          fps: s.fps) else { break }
+            if player.enqueueVideo(sample, comparison: leftSample) {
                 withExtendedLifetime(frame.cvTexture) {}
                 s.store.release(through: next)
                 s.nextToFeed.value = next + 1
@@ -1397,32 +1356,8 @@ public final class PlayerController {
         return ended
     }
 
-    /// The source texture for frame `index`: a slot in the comparison's ring of
-    /// recent frames once that exists, otherwise the one reusable source texture.
-    ///
-    /// The ring is created the first time the comparison is used and kept for the
-    /// rest of the session, so the frames behind the one on screen stay available
-    /// for the paused redraw — including when the comparison is switched off
-    /// again, which is what makes switching it back on while paused work.
-    private func sourceTexture(for s: Session, index: Int) -> MTLTexture {
-        guard compareFlag.value || s.sources != nil else { return s.srcTexture }
-        if s.sources == nil {
-            s.sources = SourceRing(device: ctx.device, width: s.srcTexture.width,
-                                   height: s.srcTexture.height, capacity: s.recentFrames)
-        }
-        return s.sources?.slot(for: index) ?? s.srcTexture
-    }
-
-    /// The source of frame `index`, if it is still held: the ring keeps the
-    /// recent ones, and the newest frame is always the reusable source texture.
-    private func retainedSource(for s: Session, index: Int) -> MTLTexture? {
-        if let held = s.sources?.texture(at: index) { return held }
-        return index == s.frameIndex.value - 1 ? s.srcTexture : nil
-    }
-
     /// Builds the scaler for a mode the viewer picked and swaps it in, or reports
-    /// why it could not. Shared by the play loop and the paused redraw, so the
-    /// enhancement can be changed while paused rather than only on resume.
+    /// why it could not, keeping the current model on a failed hot swap.
     private func applyRequestedKind(_ s: Session) {
         guard let wanted = s.requestedKind.value else { return }
         if let fresh = try? ScalerFactory.make(kind: wanted, factor: s.factor, ctx: ctx) {
@@ -1440,158 +1375,22 @@ public final class PlayerController {
         }
     }
 
-    /// Re-renders the frame the renderer is showing with the settings as they are
-    /// now, and re-queues it — so moving the divider, changing the model on either
-    /// side, or turning the comparison on or off takes effect while paused, on the
-    /// frame the viewer stopped on, instead of waiting for playback to resume.
-    ///
-    /// Runs on the video thread while the session is parked. The layer's queue is
-    /// flushed first, because a frame can only replace the image on screen if its
-    /// timestamp does not follow what is already queued — and the frames that were
-    /// queued behind the shown one are re-rendered with it, in order, so resuming
-    /// still plays them rather than skipping the flush.
-    private func redrawPausedFrame(_ s: Session) {
-        let generation = s.redrawWanted.value
-        defer { s.redrawDone.value = generation }
-
-        // A model picked while paused is built here, exactly as the play path
-        // builds it, so choosing one in the comparison bar is not queued up behind
-        // the resume. A failure is reported by `applyRequestedKind` and the old
-        // model is redrawn, which is what the viewer was looking at anyway.
-        applyRequestedKind(s)
-
-        let fps = max(s.fps, 1)
-        let last = max(0, s.frameIndex.value - 1)
-        // The frame on screen is the newest one whose timestamp the render clock
-        // has reached — which is what the layer shows, and with the producer
-        // behind the clock it is simply the newest frame produced.
-        let shown = Int((max(0, player.currentSeconds) * fps).rounded(.down))
-        // The oldest frame whose source is still held. Without one — the
-        // comparison was switched on while paused, so nothing was being retained —
-        // the newest frame stands in for the one on screen.
-        let oldestHeld = s.sources.flatMap { $0.isEmpty ? nil : $0.oldest } ?? last
-        let from = min(last, max(shown, oldestHeld))
-        // A stand-in frame is stamped *after* the paused clock, so it would only
-        // queue up rather than replace the picture; the clock moves onto it
-        // instead, which costs a few frames of content and is the one case where
-        // the still is not the frame the viewer stopped on.
-        let standIn = from > shown
-
-        // Keep the image: the frame on screen stays there until the redraw
-        // replaces it a few milliseconds later, instead of flashing black.
-        player.flush(removeImage: false)
-        if standIn { player.holdClock(atSeconds: (Double(from) + 0.5) / fps) }
-
-        for index in from...last {
-            guard let source = retainedSource(for: s, index: index),
-                  let out = acquireOutput(s, redrawing: true) else { break }
-            do {
-                try s.scaler.scale(src: source, dst: out.texture)
-            } catch {
-                status.update { $0.state = .failed; $0.message = "scale: \(error)" }
-                s.failed.value = true
-                return
+    /// Render a second full image on the same grid, never a baked-in split.
+    private func renderComparison(to s: Session, source: MTLTexture) throws -> Output? {
+        guard s.comparisonFailure.value == nil else { return nil }
+        guard s.kind.value.magnifies, compareLeft.value.magnifies else {
+            if compareFlag.value {
+                disableComparison(s, message: "Comparison needs two modes that scale the video.")
             }
-            if compareFlag.value, let cmp = comparison {
-                do {
-                    try applyComparison(cmp, to: s, source: source, out: out)
-                } catch {
-                    compareFlag.value = false
-                    status.update {
-                        $0.comparing = false
-                        $0.message = "Comparison view stopped: \(error)"
-                    }
-                }
-            }
-            guard let sample = player.makeVideoSample(pixelBuffer: out.pb,
-                                                      pts: Double(index) / fps, fps: s.fps) else { break }
-            withExtendedLifetime(out.cvTexture) {}
-            guard enqueueWhenReady(sample, s) else { break }
-            if let hook = onOutputFrame { hook(out.pb, index) }
+            return nil
         }
-        // These frames were just re-rendered with the new settings and handed to
-        // the layer, so the copies the store is holding are stale — they were
-        // rendered with the settings the viewer just changed. Drop them and move
-        // the feeder past them; it continues from whatever the producer renders
-        // next, with the new settings.
-        s.store.discardAll()
-        s.nextToFeed.value = last + 1
-        s.bufferingNow.value = false
-        postStatus(s)
-    }
-
-    /// Hands a re-rendered frame to the renderer, waiting briefly if the layer is
-    /// not ready for it yet (it can report that for a moment after a flush).
-    /// Dropping one here would leave the picture showing a frame from before the
-    /// change, so this waits rather than falling through.
-    private func enqueueWhenReady(_ sample: CMSampleBuffer, _ s: Session) -> Bool {
-        let deadline = Date().addingTimeInterval(1)
-        while true {
-            if player.enqueueVideo(sample) { return true }
-            lock.lock()
-            let ended = isEndedLocked(s.id)
-            lock.unlock()
-            if ended || Date() >= deadline { return false }
-            usleep(2_000)
-        }
-    }
-    /// Puts the left model's pixels (and the divider) into a frame that already
-    /// holds the enhancement. Runs on the video thread, once per frame.
-    ///
-    /// A split at 0 needs no work at all: the enhancement already fills the
-    /// picture, so "show only the enhanced side" costs exactly what normal
-    /// playback costs. A split at 1 copies the whole frame across.
-    private func applyComparison(_ cmp: SplitCompositor, to s: Session,
-                                 source: MTLTexture, out: Output) throws {
-        let width = s.outputWidth
-        let splitX = min(width, max(0, Int((Double(width) * compareSplit.value).rounded())))
-        guard splitX > 0 else { return }
-
-        // Off presents the frame at the source's own geometry while a model's
-        // output is 2x/4x, so the two have no shared pixel grid to be composited
-        // on. Refusing is the honest outcome — the alternative, scaling one side,
-        // would make the comparison a picture of the scaler rather than of the
-        // models.
-        guard s.kind.value.magnifies else {
-            compareFlag.value = false
-            status.update {
-                $0.comparing = false
-                $0.message = "The comparison needs a mode that scales; Off plays at "
-                    + "the source's own size."
-            }
-            return
-        }
-
-        let divider = SplitCompositor.dividerWidth(forWidth: width)
         let wanted = compareLeft.value
-
-        // Same reasoning for a left half set to a non-magnifying kind. Every route
-        // in — the menu, `_COMPARE_LEFT`, the `compareleft:` script verb — arrives
-        // here, so the refusal lives here rather than in each of them.
-        guard wanted.magnifies else {
-            compareFlag.value = false
-            status.update {
-                $0.comparing = false
-                $0.message = "\(wanted.displayName) cannot be a comparison side: a half "
-                    + "is composited at the output geometry, and it does not scale."
-            }
-            return
-        }
-
-        // Two sides showing the same model need no second pass and no scratch
-        // buffer: the pixels under the left half are already that model's output,
-        // so only the divider is drawn. That keeps "compare CNN with CNN" from
-        // paying twice for nothing.
-        if wanted == s.kind.value {
-            try cmp.drawDivider(into: out.texture, at: splitX, divider: divider)
-            return
-        }
+        if wanted == s.kind.value { return nil }
 
         // Rebuilding the left scaler is a per-frame comparison against a stored
         // value: it only changes when the viewer picks another model.
         if s.leftScaler == nil || s.leftKind != wanted {
             guard let fresh = try? ScalerFactory.make(kind: wanted, factor: s.factor, ctx: ctx) else {
-                compareFlag.value = false
                 // A half is built at the *session's* factor, so a mode pinned to
                 // another one cannot be a side of this comparison. That is worth
                 // saying precisely, because the fix is a different magnification
@@ -1604,23 +1403,23 @@ public final class PlayerController {
                 } else {
                     why = "Could not build \(wanted.displayName) for the comparison."
                 }
-                status.update {
-                    $0.comparing = false
-                    $0.message = why
-                }
-                return
+                disableComparison(s, message: why)
+                return nil
             }
             s.leftScaler = fresh
             s.leftKind = wanted
             status.update { $0.compareLeftMode = wanted.displayName }
         }
-        if s.leftScratch == nil || s.leftScratch?.width != width
-            || s.leftScratch?.height != s.outputHeight {
-            s.leftScratch = try cmp.makeScratch(width: width, height: s.outputHeight)
-        }
-        guard let scaler = s.leftScaler, let scratch = s.leftScratch else { return }
-        try scaler.scale(src: source, dst: scratch)
-        try cmp.composite(left: scratch, into: out.texture, split: splitX, divider: divider)
+        guard let scaler = s.leftScaler, let left = acquireOutput(s, completingPair: true) else { return nil }
+        try scaler.scale(src: source, dst: left.texture)
+        return left
+    }
+
+    private func disableComparison(_ s: Session, message: String) {
+        s.comparisonFailure.value = message
+        compareFlag.value = false
+        updateComparisonPresentation()
+        status.update { $0.comparing = false; $0.message = message }
     }
 
     /// End of stream: the last frames are already queued on the renderer, so the
@@ -1652,23 +1451,6 @@ public final class PlayerController {
         return ended
     }
 
-    /// Why the producer stopped waiting.
-    private enum ProducerWake { case ended, run, pausedRedraw }
-
-    /// The video thread's park: waits until the session ends, playback resumes, or
-    /// a setting changed that the frame on screen has to be re-rendered for.
-    /// Only the video thread redraws, so unlike `parkIfNeededOrEnded` this does not
-    /// absorb a redraw request — the audio thread must leave it for the video one.
-    private func waitForWork(_ s: Session) -> ProducerWake {
-        lock.lock()
-        while true {
-            if isEndedLocked(s.id) { lock.unlock(); return .ended }
-            if !pausedFlag { lock.unlock(); return .run }
-            if s.redrawWanted.value != s.redrawDone.value { lock.unlock(); return .pausedRedraw }
-            lock.wait()
-        }
-    }
-
     private func isEndedLocked(_ id: Int) -> Bool {
         stopFlag || restartFlag || sessionId != id
     }
@@ -1682,24 +1464,18 @@ public final class PlayerController {
     /// the feeder's job. Waiting on it was what capped the read-ahead at the
     /// layer's own 2-frame queue.
     ///
-    /// `redrawing` is the one caller that runs *while* parked, so it must not stop
-    /// for the pause — and it allocates outside the threshold, because it is
-    /// re-queueing frames that were counted before the flush and the pool would
-    /// otherwise refuse the last of them.
-    private func acquireOutput(_ s: Session, redrawing: Bool = false) -> Output? {
+    private func acquireOutput(_ s: Session, completingPair: Bool = false) -> Output? {
         var stalled = 0
         while true {
             lock.lock()
             let ended = isEndedLocked(s.id)
             let paused = pausedFlag
             lock.unlock()
-            if ended || paused { return nil }
-            if redrawing || !s.store.isClosed {
+            if ended || (paused && !completingPair) { return nil }
+            if !s.store.isClosed {
                 var pb: CVPixelBuffer?
-                let st = redrawing
-                    ? CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, s.pool, &pb)
-                    : CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(
-                        kCFAllocatorDefault, s.pool, s.aux, &pb)
+                let st = CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(
+                    kCFAllocatorDefault, s.pool, s.aux, &pb)
                 if st == kCVReturnWouldExceedAllocationThreshold {
                     usleep(3_000)
                     stalled += 1
@@ -1858,6 +1634,7 @@ public final class PlayerController {
         guard let file = currentFile else { return }
         audioTracks = FFmpegDecoder.probeAudio(url: file)
         subtitleTracks = FFmpegDecoder.probeSubtitles(url: file)
+        subtitleFiles = Self.discoverSubtitleFiles(for: file)
     }
 
     private func audioTrackInfos() -> [TrackInfo] {
@@ -1868,18 +1645,17 @@ public final class PlayerController {
     private func subtitleTrackInfos() -> [TrackInfo] {
         var tracks = subtitleTracks.map { TrackInfo(index: $0.index, ordinal: $0.ordinal, codec: $0.codec,
                                        language: $0.language, title: $0.title, channels: nil) }
-        if let subtitleFile {
-            if subtitleFile.tracks.isEmpty {
-                tracks.append(TrackInfo(index: -1, ordinal: tracks.count, codec: "external",
-                                        title: subtitleFile.url.lastPathComponent))
-            } else {
-                for (index, track) in subtitleFile.tracks.enumerated() {
-                    let language = track.language ?? "Track \(index + 1)"
-                    tracks.append(TrackInfo(index: -(index + 1), ordinal: tracks.count,
-                                            codec: track.codec, language: track.language,
-                                            title: "\(subtitleFile.url.lastPathComponent) · \(language) #\(index + 1)"))
-                }
+        let root = currentFile?.deletingLastPathComponent().standardizedFileURL.path.appending("/")
+        for (index, file) in subtitleFiles.enumerated() {
+            let path = file.url.standardizedFileURL.path
+            var title = root.flatMap { path.hasPrefix($0) ? String(path.dropFirst($0.count)) : nil }
+                ?? file.url.lastPathComponent
+            if let track = file.track {
+                title += " · \(track.language ?? "Track") #\(track.ordinal + 1)"
             }
+            tracks.append(TrackInfo(index: -(index + 1), ordinal: tracks.count,
+                                    codec: file.track?.codec ?? "external",
+                                    language: file.track?.language, title: title))
         }
         return tracks
     }

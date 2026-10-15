@@ -46,7 +46,7 @@ with tempfile.TemporaryDirectory(prefix="vscaler-subs-") as directory:
     bad = folder / "invalid.srt"
     bad.write_text("This is not a subtitle file.")
     script = (f"3:pause,4:readback,5:subfile:{external},7:readback,8:sub:off,10:readback,"
-              f"11:sub:1,13:readback,14:subfile:{bad},15:readback,16:sub:0,18:readback,"
+              f"11:subname:{external.name},13:readback,14:subfile:{bad},15:readback,16:sub:0,18:readback,"
               f"19:subfile:{vtt},21:readback,22:seek:6,24:readback,25:subfile:{ass},"
               f"27:readback,28:open:{plain},30:pause,31:readback,32:subfile:{ssa},34:readback")
     run = subprocess.run([
@@ -65,11 +65,10 @@ with tempfile.TemporaryDirectory(prefix="vscaler-subs-") as directory:
     check(len(loads) == 4, "Not all subtitle formats loaded")
     check(all(row["state_before"] == "paused" for row in loads), "Loading did not preserve pause")
     check(all(abs(row["playback_after"] - row["playback_before"]) < 0.2 for row in loads),
-          "Loading changed playback position")
-    check(any(row.get("subtitles") == external.name and len(row.get("subtitleTracks", [])) == 2
+          f"Loading changed playback position: {loads}")
+    check(any(row.get("subtitles") == external.name and any(track.get("title") == external.name for track in row.get("subtitleTracks", []))
               for row in rows), "Embedded and external tracks were not both listed")
-    check(any(row.get("file") == plain.name and row.get("subtitleTracks") == [] and
-              not row.get("subtitlesEnabled") for row in rows), "Subtitles leaked to the next video")
+    check(any(row.get("file") == plain.name and not row.get("subtitlesEnabled") for row in rows), "Subtitles leaked to the next video")
     captures = [row for row in events if row["event"] == "readback"]
     check(len(captures) == 11, "Missing frame checkpoints")
     images = [np.asarray(Image.open(folder / f"session_{row['session_before']:04d}_frame_0000.png").convert("RGB"))

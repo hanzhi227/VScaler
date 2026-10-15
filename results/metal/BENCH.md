@@ -1,7 +1,7 @@
 # Anime4K Metal (M5 Pro) benchmark
 
 - Device: **Apple M5 Pro**
-- Harness: `an4kbench`, synchronous `commit()` + `waitUntilCompleted()` per frame
+- Harness: `vupbench`, synchronous `commit()` + `waitUntilCompleted()` per frame
 - Timing: wall-clock ms/frame, first iteration excluded as warmup; mean over all timed iterations, with median/min because the odd scheduler spike can inflate the mean at small sizes
 - Source frames: synthetic asymmetric anime frames `assets/test_480p.png` (854x480) and `assets/test_1080p.png` (1920x1080)
 - 1080p rows: `--repeat-to-1080` re-rasterises to 1080p-class height (identity here, since the source is already 1920x1080)

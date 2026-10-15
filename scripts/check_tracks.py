@@ -264,18 +264,24 @@ def main():
 
     print("\n[2/3] audio-track selection reaches the muxed stream")
     cands = [c for c in (120, 300, 480, 700, 900, 1100) if c + 25 < dur]
-    r, offset = find_discriminative_segment(args.file, dur, cands)
-    print(f"  using offset {offset:.0f}s (tracks differ most here: r={r:+.3f})")
-    res0 = check_audio_track(args.file, args.port, args.tmp, offset, 0)
-    res1 = check_audio_track(args.file, args.port, args.tmp, offset, 1)
-    ok2 = False
-    if res0 and res1:
-        ok2 = (res0[0][0] > res0[1][0] + 0.08 and res1[1][0] > res1[0][0] + 0.08)
-        print(f"  -> index 0 matches source a:0 by {res0[0][0]-res0[1][0]:+.3f}; "
-              f"index 1 matches source a:1 by {res1[1][0]-res1[0][0]:+.3f}")
-    print(f"  -> {'PASS' if ok2 else 'FAIL'}")
-    if not ok2:
+    best = find_discriminative_segment(args.file, dur, cands)
+    if best is None:
+        print("  no candidate offset has both audio tracks inside the file, so the "
+              "selection check cannot run")
         failures.append("audio-selection")
+    else:
+        r, offset = best
+        print(f"  using offset {offset:.0f}s (tracks differ most here: r={r:+.3f})")
+        res0 = check_audio_track(args.file, args.port, args.tmp, offset, 0)
+        res1 = check_audio_track(args.file, args.port, args.tmp, offset, 1)
+        ok2 = False
+        if res0 and res1:
+            ok2 = (res0[0][0] > res0[1][0] + 0.08 and res1[1][0] > res1[0][0] + 0.08)
+            print(f"  -> index 0 matches source a:0 by {res0[0][0]-res0[1][0]:+.3f}; "
+                  f"index 1 matches source a:1 by {res1[1][0]-res1[0][0]:+.3f}")
+        print(f"  -> {'PASS' if ok2 else 'FAIL'}")
+        if not ok2:
+            failures.append("audio-selection")
 
     print(f"\n[3/3] arbitrary seek to {args.seek:.0f}s")
     ok3 = check_seek(args.file, args.port, args.tmp, args.seek)

@@ -1,6 +1,8 @@
 import Foundation
 import AppKit
 import SwiftUI
+import AVFoundation
+import CryptoKit
 import MacVideoUpscalerCore
 
 /// Hosts the player view the same way the GUI does, so harness runs exercise the
@@ -25,10 +27,9 @@ struct HostedSurface: NSViewRepresentable {
 // seek:<s>, seekrel:<s>, mode:<cnn|bypass|denoise|metalfx>, scale:<2|4>,
 // audio:<ordinal>, compare:<on|off>, compareleft:<cnn|denoise|bypass|metalfx>,
 // subfile:<path>, sub:<off|ordinal>, open:<path>,
-// split:<0..1>, dragdivider:<viewFraction> (a synthetic press-and-drag on the
-// divider line), readback (write the frame the renderer is *showing* as a PNG —
-// the paused redraw changes what is presented, which a dump of the frames rendered
-// does not prove on its own).
+// split:<0..1>, dragdivider:<pictureFraction> (a synthetic press-and-drag),
+// wipecheck (native mask geometry and hashes of both presented full frames),
+// readback (write the presented enhancement image before the wipe as a PNG).
 
 let args = ProcessInfo.processInfo.arguments
 func arg(_ name: String) -> String? {
@@ -36,6 +37,26 @@ func arg(_ name: String) -> String? {
     return args[i + 1]
 }
 func flag(_ name: String) -> Bool { args.contains(name) }
+
+// A numeric flag that is present but unparseable is a usage error rather than
+// something to ignore: running with a different value than the one asked for is
+// harder to diagnose than refusing to start.
+func intFlag(_ name: String) -> Int? {
+    guard let v = arg(name) else { return nil }
+    guard let n = Int(v), n >= 0 else {
+        FileHandle.standardError.write(Data("\(name) expects a non-negative integer, got \"\(v)\"\n".utf8))
+        exit(2)
+    }
+    return n
+}
+func doubleFlag(_ name: String) -> Double? {
+    guard let v = arg(name) else { return nil }
+    guard let n = Double(v), n.isFinite else {
+        FileHandle.standardError.write(Data("\(name) expects a finite number, got \"\(v)\"\n".utf8))
+        exit(2)
+    }
+    return n
+}
 
 guard let filePath = arg("--file") else {
     FileHandle.standardError.write(Data("""
@@ -47,26 +68,70 @@ guard let filePath = arg("--file") else {
     exit(2)
 }
 
+if flag("--check-style-compatibility") {
+    let legacy = Data(#"{"typeface":"avenir","size":1.25,"tint":"yellow","outline":"strong"}"#.utf8)
+    let decoded = try JSONDecoder().decode(SubtitleStyle.self, from: legacy)
+    precondition(decoded.typeface == .avenir && decoded.size == 1.25
+        && decoded.tint == .yellow && decoded.outline == .strong
+        && decoded.horizontalOffset == 0 && decoded.verticalOffset == 0)
+    var moved = decoded
+    moved.horizontalOffset = 0.12; moved.verticalOffset = 0.2
+    let roundTrip = try JSONDecoder().decode(SubtitleStyle.self, from: JSONEncoder().encode(moved))
+    precondition(roundTrip == moved)
+    moved.horizontalOffset = .infinity; moved.verticalOffset = .nan
+    precondition(moved.normalized.horizontalOffset == 0 && moved.normalized.verticalOffset == 0)
+}
+
 var cfg = PlayerController.Config()
 if flag("--no-audio") { cfg.audioEnabled = false }
 // --mute keeps the audio path alive (decoder, timestamps, renderer) but sends it
 // to a silent output, so an audio format can be checked without playing it out.
 if flag("--mute") { cfg.volume = 0 }
-if let v = arg("--scale"), let n = Int(v), let f = UpscaleFactor(rawValue: n) { cfg.scaleFactor = f }
+if let v = arg("--scale") {
+    guard let n = Int(v), let f = UpscaleFactor(rawValue: n) else {
+        FileHandle.standardError.write(Data("--scale must be 2 or 4, got \"\(v)\"\n".utf8))
+        exit(2)
+    }
+    cfg.scaleFactor = f
+}
 if flag("--subtitles") { cfg.burnSubtitles = true }
-if let v = arg("--sub-index"), let i = Int(v) { cfg.subtitleStreamIndex = i; cfg.burnSubtitles = true }
-if let v = arg("--audio-index"), let i = Int(v) { cfg.audioStreamIndex = i }
+if let i = intFlag("--sub-index") { cfg.subtitleStreamIndex = i; cfg.burnSubtitles = true }
+if let i = intFlag("--audio-index") { cfg.audioStreamIndex = i }
 // Read-ahead, in rendered seconds and capped in bytes. The point of the pair is
 // that a mode slower than real time can be measured with and without a buffer:
 // with a large one it plays in bursts and waits between them, with a small one it
 // stutters every frame.
-if let v = arg("--buffer-seconds"), let s = Double(v) { cfg.bufferSeconds = s }
-if let v = arg("--buffer-mb"), let mb = Int(v) { cfg.bufferBudgetBytes = mb * 1_000_000 }
+if let s = doubleFlag("--buffer-seconds") {
+    guard s > 0 else {
+        FileHandle.standardError.write(Data("--buffer-seconds must be greater than 0, got \(s)\n".utf8))
+        exit(2)
+    }
+    cfg.bufferSeconds = s
+}
+if let mb = intFlag("--buffer-mb") {
+    // Bounded so the multiplication cannot overflow and trap.
+    guard mb <= Int.max / 1_000_000 else {
+        FileHandle.standardError.write(Data("--buffer-mb must not exceed \(Int.max / 1_000_000)\n".utf8))
+        exit(2)
+    }
+    cfg.bufferBudgetBytes = mb * 1_000_000
+}
 
 let kind = ScalerKind.parse(arg("--mode"))
 
 let quiet = flag("--quiet")
-let runSeconds = Double(arg("--seconds") ?? "30") ?? 30
+let runSeconds: Double
+if let s = doubleFlag("--seconds") {
+    // Zero or less would put the deadline in the past: the run loop below never
+    // spins and the harness exits 0 having validated nothing.
+    guard s > 0 else {
+        FileHandle.standardError.write(Data("--seconds must be greater than 0, got \(s)\n".utf8))
+        exit(2)
+    }
+    runSeconds = s
+} else {
+    runSeconds = 30
+}
 
 // AppKit is needed even headless: the display layer lives in an NSView. A window
 // is only ordered front when --window is passed; the layer consumes samples
@@ -131,8 +196,7 @@ controller.onSurfaceClick = { [weak controller] in
     if controller.isPaused { controller.resume() } else { controller.pause() }
 }
 
-// --compare: start in the side-by-side source/enhanced view. The dumped frames
-// then contain both halves, so the left one can be checked against a bypass run.
+// --compare starts the presentation-time wipe; output dumps remain full enhancement frames.
 if flag("--compare") { controller.setCompare(true) }
 
 func synthesizeClick(on target: NSView) {
@@ -148,16 +212,17 @@ func synthesizeClick(on target: NSView) {
     }
 }
 
-/// Presses the divider where it currently sits and drags it to `viewFraction` of
+/// Presses the divider where it currently sits and drags it to `pictureFraction` of
 /// the way across the surface, then releases. Sends the three events a real drag
 /// would, so the view's grab-and-move path is exercised rather than the setter.
-func dragDivider(to viewFraction: CGFloat, on target: NSView, from startViewX: CGFloat) {
+func dragDivider(to pictureFraction: CGFloat, on target: NSView, from startViewX: CGFloat) {
     guard let windowNumber = target.window?.windowNumber else { return }
     let y = target.bounds.midY
     // View coordinates in, window coordinates out: that is what mouseDown does in
     // reverse when it reads `event.locationInWindow`.
     let start = target.convert(NSPoint(x: startViewX, y: y), to: nil)
-    let end = target.convert(NSPoint(x: target.bounds.minX + viewFraction * target.bounds.width,
+    let picture = target.layer?.sublayers?.first?.frame ?? target.bounds
+    let end = target.convert(NSPoint(x: picture.minX + pictureFraction * picture.width,
                                      y: y), to: nil)
     let steps: [(NSEvent.EventType, NSPoint, Float)] = [
         (.leftMouseDown, start, 1.0),
@@ -177,6 +242,37 @@ func dragDivider(to viewFraction: CGFloat, on target: NSView, from startViewX: C
         }
     }
 }
+var wipeCaptures = 0
+func comparisonState(capturePixels: Bool) -> [String: Any] {
+    var wipe: [String: Any] = [:]
+    let layers = (view.layer?.sublayers ?? []).compactMap { $0 as? AVSampleBufferDisplayLayer }
+    wipe["layer_count"] = layers.count
+    if layers.count == 2, let mask = layers[1].mask {
+        wipe["aligned"] = layers[0].frame == layers[1].frame
+        wipe["mask_fraction"] = mask.frame.width / max(1, layers[1].bounds.width)
+        wipe["hidden"] = layers[1].isHidden
+        wipe["animated"] = !(mask.animationKeys() ?? []).isEmpty
+        if capturePixels, #available(macOS 14.4, *) {
+            for (index, layer) in layers.enumerated() {
+                if let pb = layer.sampleBufferRenderer.displayedPixelBuffer() {
+                    if flag("--dump-wipe") {
+                        let file = dumpDir.appendingPathComponent(String(format: "comparison_%03d_%d.png", wipeCaptures, index))
+                        FrameCapture.writePNG(pb, to: file)
+                    }
+                    CVPixelBufferLockBaseAddress(pb, .readOnly)
+                    if let base = CVPixelBufferGetBaseAddress(pb) {
+                        let bytes = Data(bytes: base, count: CVPixelBufferGetBytesPerRow(pb) * CVPixelBufferGetHeight(pb))
+                        wipe["frame_\(index)_sha256"] = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+                    }
+                    CVPixelBufferUnlockBaseAddress(pb, .readOnly)
+                }
+            }
+        }
+    }
+    if capturePixels { wipeCaptures += 1 }
+    return wipe
+}
+
 // Optional frame dump: write the first N output frames as PNGs. Lets a run be
 // inspected without a window (this environment has no Screen Recording access).
 let dumpDir = URL(fileURLWithPath: arg("--dump-dir") ?? NSTemporaryDirectory())
@@ -238,7 +334,9 @@ if let script = arg("--script") {
             let before = controller.playbackSeconds
             let statusBefore = controller.status.current
             var controlError = ""
+            let actionStarted = ProcessInfo.processInfo.systemUptime
             switch a.verb {
+            case "wipecheck": break
             case "pause": controller.pause()
             case "resume": controller.resume()
             case "click": synthesizeClick(on: view)
@@ -253,6 +351,34 @@ if let script = arg("--script") {
                     }
                 }
                 catch { controlError = error.localizedDescription }
+            case "subfiles":
+                do {
+                    if let video = controller.currentFile {
+                        let urls = (a.value ?? "").split(separator: "|").map { URL(fileURLWithPath: String($0)) }
+                        try controller.loadSubtitleFiles(urls, for: video)
+                    }
+                }
+                catch { controlError = error.localizedDescription }
+            case "subpos":
+                let parts = (a.value ?? "").split(separator: "/").compactMap { Double($0) }
+                if parts.count == 2 {
+                    var style = controller.config.subtitleStyle
+                    style.horizontalOffset = parts[0]; style.verticalOffset = parts[1]
+                    controller.setSubtitleStyle(style)
+                } else { controlError = "Invalid subtitle position" }
+            case "substyle":
+                let parts = (a.value ?? "").split(separator: "/").map(String.init)
+                if parts.count == 4, let face = SubtitleStyle.Typeface(rawValue: parts[0]),
+                   let size = Double(parts[1]), let tint = SubtitleStyle.Tint(rawValue: parts[2]),
+                   let outline = SubtitleStyle.Outline(rawValue: parts[3]) {
+                    var style = SubtitleStyle()
+                    style.typeface = face; style.size = size; style.tint = tint; style.outline = outline
+                    controller.setSubtitleStyle(style)
+                } else { controlError = "Invalid subtitle appearance" }
+            case "subname":
+                if let track = controller.availableSubtitleTracks.first(where: { $0.title?.contains(a.value ?? "") == true }) {
+                    controller.setSubtitleTrack(track.ordinal)
+                } else { controlError = "Subtitle not found: \(a.value ?? "")" }
             case "sub":
                 if a.value == "off" { controller.setSubtitles(false) }
                 else { controller.setSubtitleTrack(Int(a.value ?? "0") ?? 0) }
@@ -290,6 +416,7 @@ if let script = arg("--script") {
                 }
             default: break
             }
+            let wipe = comparisonState(capturePixels: a.verb == "wipecheck")
             let ev: [String: Any] = [
                 "event": a.verb, "at": a.at, "wall": Date().timeIntervalSince(started),
                 "value": a.value ?? "",
@@ -302,6 +429,8 @@ if let script = arg("--script") {
                 "frames": controller.status.current.framesProcessed,
                 "state": controller.status.current.state.rawValue,
                 "compare_split": controller.compareSplitFraction,
+                "action_ms": (ProcessInfo.processInfo.systemUptime - actionStarted) * 1000,
+                "wipe": wipe,
             ]
             if let d = try? JSONSerialization.data(withJSONObject: ev, options: [.sortedKeys]) {
                 FileHandle.standardOutput.write(d + Data("\n".utf8))
@@ -314,7 +443,7 @@ if let script = arg("--script") {
 
 do {
     try controller.open(file: URL(fileURLWithPath: filePath), kind: kind,
-                        startAt: Double(arg("--seek") ?? "0") ?? 0)
+                        startAt: doubleFlag("--seek") ?? 0)
 } catch {
     FileHandle.standardError.write(Data("open failed: \(error)\n".utf8))
     exit(1)

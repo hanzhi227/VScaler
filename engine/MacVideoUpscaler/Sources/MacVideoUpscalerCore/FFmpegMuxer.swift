@@ -27,6 +27,8 @@ struct SubtitleBurn {
     let sourceWidth: Int
     let sourceHeight: Int
     var externalURL: URL? = nil
+    var horizontalOffset: Double = 0
+    var verticalOffset: Double = 0
 }
 
 /// Wraps an ffmpeg subprocess that:
@@ -201,10 +203,13 @@ final class FFmpegMuxer {
 
     /// Close stdin and wait for the tail of the TS stream.
     func finish() {
-        guard let p = process, p.isRunning else { return }
+        // stdin is closed even when ffmpeg has already exited (encoder error):
+        // the write end must not stay open until dealloc, and the guard below
+        // only decides whether there is a tail left to wait for.
         try? stdinHandle?.close()
         stdinHandle = nil
         stdinFD = nil
+        guard let p = process, p.isRunning else { return }
         Subprocess.wait(for: p, timeout: 30)
     }
 

@@ -1,0 +1,25 @@
+Subtitle positioning — 2026-10-14
+
+Subtitle Appearance now includes horizontal and vertical offsets, a full-frame
+preview, and Reset Position. Position changes are applied with Apply and saved
+alongside font preferences. Older saved styles decode with zero offsets and keep
+their font, size, color and outline.
+
+Text is moved at output resolution and constrained to the video frame. Bitmap
+subtitles are moved in the decoder's overlay; display-coordinate offsets are
+mapped back into the source canvas before 90/180/270-degree rotation. Original
+placement is preserved at zero offsets. Applying position changes preserves pause
+and the requested playback time for text and bitmap tracks.
+
+PASS: release build; git diff --check.
+PASS: scripts/check_subtitle_position.py — rendered pixels moved exactly 10% right
+and 20% up for text, external VobSub, embedded bitmap tracks, and all three video
+rotation angles. Reset reproduced the original pixels. Pause/time were preserved.
+Also checked old-style JSON migration, new-style round-trip, and nonfinite offsets.
+PASS: scripts/check_vobsub.py — original bitmap rendering, Off, paired-file loads,
+seek into cue/gap, missing companion validation and new-video scope.
+Visual check: native settings view rendered and inspected; position sliders were
+simplified and the final layout confirmed.
+
+Large bitmap offsets can clip the authored subpicture at the video frame edges.
+Native button clicks and an interactive preference relaunch were not automated.

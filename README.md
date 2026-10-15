@@ -1,6 +1,6 @@
 # VScaler
 
-VScaler plays video on an Apple Silicon Mac while upscaling each frame on the GPU. It opens local files in its own window, keeps audio and video on a shared playback clock, and lets you switch enhancement modes during playback. The default is MetalFX Spatial. Anime4K and two Real-ESRGAN checkpoints are also included.
+VScaler plays video on an Apple Silicon Mac while upscaling each frame on the GPU. It opens local files in its own window, keeps audio and video on a shared playback clock, and lets you switch enhancement modes during playback. The default is MetalFX Spatial. A CNN upscaler and two Real-ESRGAN checkpoints are also included.
 
 This is a source release. Build the app on your Mac; there is no signed download in this repository.
 
@@ -40,8 +40,8 @@ The app is not notarized. macOS may ask you to use **right click → Open** the 
 | Mode | Use |
 |---|---|
 | MetalFX Spatial | Default. Fast general scaling, though it can sharpen soft footage too much. |
-| Anime4K CNN | A 2× CNN for animation. The 4× setting runs it twice. |
-| Anime4K CNN + denoise | The Anime4K denoise variant. |
+| CNN | A 2× CNN upscaler. The 4× setting runs it twice. |
+| CNN + denoise | The denoise variant of the same CNN. |
 | Real-ESRGAN AnimeVideo-v3 | A 4× model for SD sources. Check its results on your own material; it can replace texture. |
 | Real-ESRGAN General-x4 | A second 4× model included for comparison. It was slower and scored worse than AnimeVideo-v3 in this project's tests. |
 | Bypass | Bilinear scaling without enhancement. |
@@ -57,7 +57,7 @@ There are three local Swift packages and no external Swift package dependencies.
 
 ```bash
 swift build -c release --package-path engine/MacVideoUpscaler
-swift build --package-path engine/Anime4KMetal
+swift build --package-path engine/VideoUpscaleMetal
 swift build --package-path engine/RealESRGANMetal
 
 engine/MacVideoUpscaler/.build/release/playercheck \

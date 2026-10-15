@@ -18,7 +18,7 @@ Three SwiftPM packages under `engine/`, no external Swift dependencies:
 
 ```bash
 swift build --package-path engine/MacVideoUpscaler      # core + all three executables
-swift build --package-path engine/Anime4KMetal          # standalone, has its own bench CLI
+swift build --package-path engine/VideoUpscaleMetal     # standalone, has its own bench CLI
 swift build --package-path engine/RealESRGANMetal       # standalone, has its own bench CLI
 ```
 
@@ -95,7 +95,7 @@ the documented commands instead:
 The weight blobs are generated and carry their provenance in the first lines —
 do not edit them by hand:
 
-- `engine/Anime4KMetal/Sources/Anime4KMetal/CNNWeights.swift` ← `Scripts/extract_weights.py`
+- `engine/VideoUpscaleMetal/Sources/VideoUpscaleMetal/CNNWeights.swift` ← `Scripts/extract_weights.py`
 - `engine/RealESRGANMetal/Sources/RealESRGANMetal/*Weights.swift` ← `scripts/realesrgan/export_weights.py`
 
 If you regenerate or add weights from an upstream project, keep the upstream

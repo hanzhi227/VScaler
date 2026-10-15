@@ -1,7 +1,7 @@
 import Foundation
 
-/// Metal Shading Language source for the Anime4K v3.2 `Upscale_CNN_x2_M`
-/// (and `Upscale_Denoise_CNN_x2_M`) network, plus a `bilinear2x` fallback.
+/// Metal Shading Language source for the CNN 2× network (weights from Anime4K
+/// v3.2 `Upscale_CNN_x2_M` / `Upscale_Denoise_CNN_x2_M`), plus `bilinear2x`.
 ///
 /// Coordinate convention: `gid == (0,0)` is the top-left pixel and +y goes
 /// DOWN, matching the texel-offset semantics of the upstream mpv GLSL

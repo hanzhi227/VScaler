@@ -21,6 +21,10 @@ struct UpscalerApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1100, height: 700)
         .commands { PlayerCommands(model: model) }
+        Settings {
+            SubtitleAppearanceView(model: model)
+        }
+        .windowResizability(.contentSize)
     }
 }
 
@@ -36,6 +40,11 @@ final class AppModel: ObservableObject {
     @Published var audioOrdinal = 0
     /// -1 = subtitles off.
     @Published var subOrdinal = -1
+    @Published var subtitleStyle: SubtitleStyle = {
+        guard let data = UserDefaults.standard.data(forKey: "subtitle.appearance"),
+              let style = try? JSONDecoder().decode(SubtitleStyle.self, from: data) else { return SubtitleStyle() }
+        return style.normalized
+    }()
     @Published var showStats = false
     /// Side-by-side comparison: which model fills the left of the divider, and
     /// where the divider sits (0 = enhancement only, 1 = left model only). The
@@ -46,7 +55,18 @@ final class AppModel: ObservableObject {
     /// Whether the window is in full screen, so the menu item can say which way
     /// it will go and the diagnostics can report it.
     @Published var isFullScreen = false
-    private var windowedPresentationOptions: NSApplication.PresentationOptions?
+    private struct WindowedState {
+        let frame: NSRect
+        let styleMask: NSWindow.StyleMask
+        let isMovable: Bool
+        let presentationOptions: NSApplication.PresentationOptions
+    }
+    /// What full screen changed, to put back on the way out; nil when windowed.
+    private var windowedState: WindowedState?
+    /// Serializes the off-main expansion in `addToQueue` and delivers through
+    /// the FIFO main queue, so rapid adds (a Finder open event plus the
+    /// diagnostic env hook, say) reach `enqueue` in the order they were made.
+    private let expansionQueue = DispatchQueue(label: "vscaler.addToQueue", qos: .userInitiated)
     @Published private(set) var queue: [URL] = []
     @Published private(set) var currentIndex: Int?
 
@@ -83,6 +103,7 @@ final class AppModel: ObservableObject {
         engine = ctrl
         playerView = view
         lastError = err
+        ctrl?.config.subtitleStyle = subtitleStyle
         AppModel.engineForShutdown = ctrl
         ctrl?.status.on_change = { [weak self] snap in
             Task { @MainActor in self?.apply(snap) }
@@ -163,19 +184,20 @@ final class AppModel: ObservableObject {
         guard engine != nil, let index = currentIndex, queue.indices.contains(index) else { return }
         let video = queue[index]
         let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.allowedContentTypes = ["srt", "vtt", "ass", "ssa", "idx", "sub"].compactMap { UTType(filenameExtension: $0) }
         let folder = video.deletingLastPathComponent()
         let subs = folder.appendingPathComponent("subs", isDirectory: true)
         panel.directoryURL = (try? subs.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true ? subs : folder
-        panel.message = "Choose subtitles for the current video. Keep .idx and .sub files together."
+        panel.message = "Choose subtitles for the current video. Select subtitle files, including .idx and .sub pairs."
         panel.prompt = "Load Subtitles"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard panel.runModal() == .OK else { return }
+        let urls = panel.urls
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let engine = self?.engine else { return }
             do {
-                try engine.loadSubtitleFile(url, for: video)
+                try engine.loadSubtitleFiles(urls, for: video)
                 DispatchQueue.main.async { self?.lastError = nil }
             } catch {
                 let message = error.localizedDescription
@@ -191,20 +213,38 @@ final class AppModel: ObservableObject {
         panel.message = "Choose a folder of videos to add to the queue"
         guard panel.runModal() == .OK, let folder = panel.url else { return }
         lastError = nil
-        let found = videos(in: folder)
-        if found.isEmpty {
-            if lastError == nil { lastError = "No videos found in the selected folder." }
-        } else {
-            addToQueue(found)
+        videos(in: folder) { [weak self] found in
+            guard let self else { return }
+            if let found {
+                if found.isEmpty {
+                    lastError = "No videos found in the selected folder."
+                } else {
+                    addToQueue(found)
+                }
+            } else {
+                lastError = "Could not read the selected folder."
+            }
         }
     }
 
-    private func videos(in folder: URL) -> [URL] {
+    /// Enumerates a folder for videos off the main thread and delivers the
+    /// result back on the main thread: the recursive stat of a large or network
+    /// folder takes long enough to beachball the UI. `nil` means the folder
+    /// could not be read.
+    private func videos(in folder: URL, completion: @escaping @MainActor ([URL]?) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let found = Self.enumerateVideos(in: folder)
+            Task { @MainActor in completion(found) }
+        }
+    }
+
+    /// The enumeration itself: pure, so it is safe off the main actor. Results
+    /// are in filename order, which is also the queue order.
+    private nonisolated static func enumerateVideos(in folder: URL) -> [URL]? {
         let keys: Set<URLResourceKey> = [.isRegularFileKey, .isDirectoryKey]
         guard let files = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: Array(keys),
                                                          options: [.skipsHiddenFiles, .skipsPackageDescendants]) else {
-            lastError = "Could not read the selected folder."
-            return []
+            return nil
         }
         let extensions: Set<String> = ["mp4", "m4v", "mov", "mkv", "webm", "ts", "m2ts", "mts",
                                        "flv", "avi", "divx", "mpg", "mpeg", "vob", "mxf", "wmv",
@@ -220,15 +260,31 @@ final class AppModel: ObservableObject {
     }
 
     func addToQueue(_ urls: [URL]) {
-        let expanded = urls.flatMap { url -> [URL] in
-            if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
-                return videos(in: url)
+        // A directory in the list expands through the same off-main enumeration
+        // as Add Folder, so a folder opened from the Finder or the Dock cannot
+        // beachball the UI either. The expansion runs on the serial queue above
+        // and is delivered with DispatchQueue.main.async rather than a Task hop:
+        // the main queue is FIFO, so two rapid adds reach `enqueue` in submission
+        // order instead of whichever expansion happened to finish first. The
+        // queue itself is only touched on the main thread, in `enqueue`.
+        expansionQueue.async { [weak self] in
+            let expanded = urls.flatMap { url -> [URL] in
+                if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                    return Self.enumerateVideos(in: url) ?? []
+                }
+                return [url]
             }
-            return [url]
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.enqueue(expanded) }
+            }
         }
+    }
+
+    /// Deduplicates and appends on the main thread.
+    private func enqueue(_ urls: [URL]) {
         let existing = Set(queue.map(\.standardizedFileURL))
         var seen = existing
-        let added = expanded.filter { url in
+        let added = urls.filter { url in
             let file = url.standardizedFileURL
             guard !seen.contains(file) else { return false }
             seen.insert(file)
@@ -249,16 +305,16 @@ final class AppModel: ObservableObject {
         guard let c = engine else { return }
         currentIndex = index
         handledSessionId = status.sessionId
-        do {
-            c.config.scaleFactor = factor
-            c.config.audioStreamIndex = audioOrdinal
-            c.config.burnSubtitles = subOrdinal >= 0
-            if subOrdinal >= 0 { c.config.subtitleStreamIndex = subOrdinal }
-            try c.open(file: queue[index], kind: kind)
-            lastError = nil
-        } catch {
-            lastError = "\(error)"
-        }
+        c.config.scaleFactor = factor
+        c.config.audioStreamIndex = audioOrdinal
+        c.config.burnSubtitles = subOrdinal >= 0
+        if subOrdinal >= 0 { c.config.subtitleStreamIndex = subOrdinal }
+        // open cannot throw: a file that fails to decode reports it by moving to
+        // state .failed, which the view shows from status.message.
+        try? c.open(file: queue[index], kind: kind)
+        // A new open is a new user action: whatever came before no longer applies.
+        lastError = nil
+        stutterNote = nil
     }
 
     func nextInQueue() {
@@ -401,51 +457,92 @@ final class AppModel: ObservableObject {
         if ordinal < 0 { engine?.setSubtitles(false) } else { engine?.setSubtitleTrack(ordinal) }
     }
 
-    func toggleFullScreen() { playerView?.window?.toggleFullScreen(nil) }
-
-    /// Track full screen from the window's own notifications rather than from the
-    /// calls that request it: entering and leaving are asynchronous and can also be
-    /// driven by the green button, ⌃⌘F or a swipe, so the notification is the only
-    /// thing that knows the real state.
-    private func observeFullScreen() {
-        let center = NotificationCenter.default
-        center.addObserver(forName: NSWindow.willEnterFullScreenNotification, object: nil,
-                           queue: .main) { [weak self] note in
-            MainActor.assumeIsolated {
-                guard let self, let window = note.object as? NSWindow,
-                      window === self.playerView?.window else { return }
-                self.windowedPresentationOptions = NSApp.presentationOptions
-            }
+    func applySubtitleAppearance(_ style: SubtitleStyle) {
+        subtitleStyle = style.normalized
+        if let data = try? JSONEncoder().encode(subtitleStyle) {
+            UserDefaults.standard.set(data, forKey: "subtitle.appearance")
         }
-        let pairs: [(NSNotification.Name, Bool)] = [
-            (NSWindow.didEnterFullScreenNotification, true),
-            (NSWindow.didExitFullScreenNotification, false),
-        ]
-        for (name, entered) in pairs {
-            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
-                MainActor.assumeIsolated {
-                    guard let self, let window = note.object as? NSWindow,
-                          window === self.playerView?.window else { return }
-                    self.isFullScreen = entered
-                    if entered {
-                        var options = NSApp.presentationOptions
-                        options.subtract([.hideMenuBar, .hideDock])
-                        options.formUnion([.autoHideMenuBar, .autoHideDock])
-                        NSApp.presentationOptions = options
-                    } else if let options = self.windowedPresentationOptions {
-                        NSApp.presentationOptions = options
-                        self.windowedPresentationOptions = nil
-                    }
-                    if ProcessInfo.processInfo.environment["MACVIDEOUPSCALER_DIAG"] == "1" {
-                        NSLog("[fullscreen] entered=%d menuAutoHide=%d", entered ? 1 : 0,
-                              NSApp.presentationOptions.contains(.autoHideMenuBar) ? 1 : 0)
-                    }
-                }
+        engine?.setSubtitleStyle(subtitleStyle)
+    }
+
+    /// Full screen is the app's own: the window is laid over its screen in the
+    /// current Space rather than given a native full-screen Space. In a native
+    /// Space macOS ignores `.hideMenuBar`/`.autoHideMenuBar` whenever "Automatically
+    /// hide and show the menu bar" is set to Never, so the menu bar would stay over
+    /// the picture; outside one the app's presentation options are honoured.
+    func toggleFullScreen() {
+        guard let window = playerView?.window else { return }
+        if windowedState == nil { enterFullScreen(window) } else { exitFullScreen(window) }
+    }
+
+    private func enterFullScreen(_ window: NSWindow) {
+        guard let screen = window.screen ?? NSScreen.main else { return }
+        windowedState = WindowedState(frame: window.frame, styleMask: window.styleMask,
+                                      isMovable: window.isMovable,
+                                      presentationOptions: NSApp.presentationOptions)
+        var options = NSApp.presentationOptions
+        options.subtract([.hideMenuBar, .hideDock])
+        options.formUnion([.autoHideMenuBar, .autoHideDock])
+        NSApp.presentationOptions = options
+        window.styleMask.remove([.titled, .resizable])
+        window.isMovable = false
+        window.setFrame(screen.frame, display: true)
+        window.makeKeyAndOrderFront(nil)
+        isFullScreen = true
+        logFullScreen(window)
+    }
+
+    private func exitFullScreen(_ window: NSWindow) {
+        guard let state = windowedState else { return }
+        windowedState = nil
+        NSApp.presentationOptions = state.presentationOptions
+        window.styleMask = state.styleMask
+        window.isMovable = state.isMovable
+        window.setFrame(state.frame, display: true)
+        window.makeKeyAndOrderFront(nil)
+        isFullScreen = false
+        logFullScreen(window)
+    }
+
+    private func logFullScreen(_ window: NSWindow) {
+        guard ProcessInfo.processInfo.environment["MACVIDEOUPSCALER_DIAG"] == "1" else { return }
+        NSLog("[fullscreen] entered=%d menuAutoHide=%d frame=%@ screen=%@ key=%d", isFullScreen ? 1 : 0,
+              NSApp.presentationOptions.contains(.autoHideMenuBar) ? 1 : 0,
+              NSStringFromRect(window.frame), NSStringFromRect(window.screen?.frame ?? .zero),
+              window.isKeyWindow ? 1 : 0)
+    }
+
+    /// Native full screen (the green button, a trackpad swipe) would bring the
+    /// menu bar back, so the window opts out of it; the green button zooms
+    /// instead. A display change while in full screen refits the window.
+    private func observeFullScreen() {
+        DispatchQueue.main.async { [weak self] in
+            guard let window = self?.playerView?.window else { return }
+            window.collectionBehavior.remove(.fullScreenPrimary)
+            window.collectionBehavior.insert(.fullScreenNone)
+        }
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.windowedState != nil, let window = self.playerView?.window,
+                      let screen = window.screen ?? NSScreen.main else { return }
+                window.setFrame(screen.frame, display: true)
             }
         }
     }
 
+    /// Escape leaves full screen, as it does in other players.
+    func handleFullScreenKey(_ event: NSEvent) -> Bool {
+        guard isFullScreen, event.type == .keyDown, event.keyCode == 53,
+              let window = playerView?.window, event.window === window else { return false }
+        exitFullScreen(window)
+        return true
+    }
+
     func stop() {
+        // Leave full screen first so the window's saved frame is the windowed one.
+        if let window = playerView?.window { exitFullScreen(window) }
         engine?.stop()
         if let activity = displaySleepActivity {
             ProcessInfo.processInfo.endActivity(activity)
@@ -460,6 +557,24 @@ final class AppModel: ObservableObject {
         // Each hook stands alone, so for example `_DIAG=1` alone still logs a run
         // whose file was opened by double-clicking it in the Finder.
         guard let c = engine else { return }
+        if let path = env["MACVIDEOUPSCALER_SETTINGS_PREVIEW"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                guard let self else { return }
+                let content = NSHostingView(rootView: SubtitleAppearanceView(model: self))
+                let window = NSWindow(contentRect: NSRect(x: -3000, y: -3000, width: 480, height: 480),
+                                      styleMask: [.titled], backing: .buffered, defer: false)
+                window.isReleasedWhenClosed = false
+                window.contentView = content
+                window.setContentSize(content.fittingSize)
+                window.orderBack(nil)
+                content.layoutSubtreeIfNeeded()
+                if let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) {
+                    content.cacheDisplay(in: content.bounds, to: bitmap)
+                    try? bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+                }
+                window.close()
+            }
+        }
         if let s = env["MACVIDEOUPSCALER_SCALE"], let n = Int(s), let f = UpscaleFactor(rawValue: n) {
             factor = f
         }
@@ -502,6 +617,8 @@ final class AppModel: ObservableObject {
                         + "out=\(s.sourceWidth)x\(s.sourceHeight)->\(s.outputWidth)x\(s.outputHeight) "
                         + "audio=\(String(format: "%.2f", Double(s.audioFramesEnqueued) / 48000)) "
                         + "full=\(self?.isFullScreen == true ? 1 : 0) "
+                        + "menuAutoHide=\(NSApp.currentSystemPresentationOptions.contains(.autoHideMenuBar) ? 1 : 0) "
+                        + "active=\(NSApp.isActive ? 1 : 0) "
                         + "cmp=\(s.comparing ? 1 : 0) "
                         + "skip=\(String(format: "%.0f", s.pendingSkipSeconds)) "
                         + "raw=\(s.renderStatus)"
@@ -561,17 +678,26 @@ final class AppModel: ObservableObject {
 
     /// Feed the normal input monitor without needing global input permissions.
     private func scheduleMouseMoves(_ list: String) {
-        for time in list.split(separator: ",").compactMap({ Double($0) }) {
+        for item in list.split(separator: ",") {
+            let parts = item.split(separator: ":", maxSplits: 1)
+            guard let time = Double(parts[0]) else { continue }
+            let top = parts.count == 2 && parts[1] == "top"
             DispatchQueue.main.asyncAfter(deadline: .now() + time) { [weak self] in
-                guard let window = self?.playerView?.window,
-                      let event = NSEvent.mouseEvent(
-                        with: .mouseMoved,
-                        location: NSPoint(x: window.frame.width / 2, y: window.frame.height / 2),
-                        modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                        windowNumber: window.windowNumber, context: nil,
-                        eventNumber: 0, clickCount: 0, pressure: 0) else { return }
+                guard let window = self?.playerView?.window else { return }
+                let point: NSPoint
+                if top, let screen = window.screen {
+                    point = window.convertFromScreen(NSRect(x: screen.frame.midX,
+                        y: screen.frame.maxY - 2, width: 0, height: 0)).origin
+                } else {
+                    point = NSPoint(x: window.frame.width / 2, y: window.frame.height / 2)
+                }
+                guard let event = NSEvent.mouseEvent(
+                    with: .mouseMoved, location: point,
+                    modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil,
+                    eventNumber: 0, clickCount: 0, pressure: 0) else { return }
                 NSApp.postEvent(event, atStart: false)
-                NSLog("[move] full=%d", self?.isFullScreen == true ? 1 : 0)
+                NSLog("[move] full=%d top=%d", self?.isFullScreen == true ? 1 : 0, top ? 1 : 0)
             }
         }
     }
@@ -698,6 +824,7 @@ final class AppModel: ObservableObject {
             "down": (125, String(UnicodeScalar(NSDownArrowFunctionKey)!)),
             "up": (126, String(UnicodeScalar(NSUpArrowFunctionKey)!)),
             "space": (49, " "),
+            "escape": (53, "\u{1b}"),
             "s": (1, "s"),
             "c": (8, "c"),
             "f": (3, "f"),
@@ -946,7 +1073,9 @@ struct PlayerCommands: Commands {
         }
 
         CommandMenu("Subtitles") {
-            Button("Load Subtitle File…") { model.openSubtitlePanel() }
+            SettingsLink { Text("Subtitle Appearance…") }
+            Divider()
+            Button("Load Subtitle Files…") { model.openSubtitlePanel() }
                 .keyboardShortcut("o", modifiers: [.command, .option])
                 .disabled(model.currentIndex == nil || idle)
             Divider()
@@ -954,7 +1083,7 @@ struct PlayerCommands: Commands {
                 get: { model.subOrdinal < 0 },
                 set: { _ in model.setSubtitleTrack(-1) }))
             if model.status.subtitleTracks.isEmpty {
-                Text("No subtitle tracks in file")
+                Text("No subtitles found")
             } else {
                 Divider()
                 ForEach(model.status.subtitleTracks) { t in
@@ -973,6 +1102,101 @@ struct PlayerCommands: Commands {
                 .keyboardShortcut("f", modifiers: [.command, .control])
             Text("Double-click the picture to toggle full screen")
         }
+    }
+}
+
+struct SubtitleAppearanceView: View {
+    @ObservedObject var model: AppModel
+    @State private var draft = SubtitleStyle()
+
+    private func offsetLabel(_ value: Double, negative: String, positive: String) -> String {
+        let percent = Int((abs(value) * 100).rounded())
+        return percent == 0 ? "Original" : "\(percent)% \(value < 0 ? negative : positive)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Subtitle Appearance").font(.title2.weight(.semibold))
+            ZStack {
+                Color.black
+                if let image = draft.previewImage() {
+                    Image(decorative: image, scale: 1)
+                        .resizable().scaledToFit()
+                }
+            }
+            .frame(height: 200)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .accessibilityLabel("Preview: A clearer view of every word.")
+
+            Form {
+                Picker("Font", selection: $draft.typeface) {
+                    ForEach(SubtitleStyle.Typeface.allCases, id: \.self) { face in
+                        Text(face.label).tag(face)
+                    }
+                }
+                LabeledContent("Size") {
+                    HStack {
+                        Slider(value: $draft.size, in: 0.75...1.5, step: 0.05)
+                            .accessibilityLabel("Subtitle size")
+                        Text("\(Int((draft.size * 100).rounded()))%")
+                            .monospacedDigit().frame(width: 44, alignment: .trailing)
+                    }
+                }
+                Picker("Color", selection: $draft.tint) {
+                    ForEach(SubtitleStyle.Tint.allCases, id: \.self) { tint in
+                        Text(tint.label).tag(tint)
+                    }
+                }
+                Picker("Outline", selection: $draft.outline) {
+                    ForEach(SubtitleStyle.Outline.allCases, id: \.self) { outline in
+                        Text(outline.label).tag(outline)
+                    }
+                }
+            }
+            .formStyle(.columns)
+            Form {
+                LabeledContent("Horizontal") {
+                    HStack {
+                        Slider(value: Binding(
+                            get: { draft.horizontalOffset },
+                            set: { draft.horizontalOffset = ($0 * 100).rounded() / 100 }), in: -0.4...0.4)
+                            .accessibilityLabel("Horizontal subtitle position")
+                        Text(offsetLabel(draft.horizontalOffset, negative: "left", positive: "right"))
+                            .monospacedDigit().frame(width: 82, alignment: .trailing)
+                    }
+                }
+                LabeledContent("Vertical") {
+                    HStack {
+                        Slider(value: Binding(
+                            get: { draft.verticalOffset },
+                            set: { draft.verticalOffset = ($0 * 100).rounded() / 100 }), in: -0.1...0.8)
+                            .accessibilityLabel("Vertical subtitle position")
+                        Text(offsetLabel(draft.verticalOffset, negative: "down", positive: "up"))
+                            .monospacedDigit().frame(width: 82, alignment: .trailing)
+                    }
+                }
+            }
+            .formStyle(.columns)
+            Text("Position applies to text and image subtitles. Font settings apply to text only; .idx/.sub files keep their original lettering.")
+                .font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Reset to Defaults") { draft = SubtitleStyle() }
+                Button("Reset Position") {
+                    draft.horizontalOffset = 0
+                    draft.verticalOffset = 0
+                }
+                .disabled(draft.horizontalOffset == 0 && draft.verticalOffset == 0)
+                Spacer()
+                Button("Apply") { model.applySubtitleAppearance(draft) }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(draft == model.subtitleStyle)
+            }
+        }
+        .padding(24)
+        .frame(width: 480)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear { draft = model.subtitleStyle }
     }
 }
 
@@ -1032,12 +1256,14 @@ struct PlayerScreen: View {
                            .otherMouseDown, .leftMouseDragged, .rightMouseDragged,
                            .scrollWheel, .keyDown]
             ) { event in
-                MainActor.assumeIsolated {
+                let consumed = MainActor.assumeIsolated {
+                    if model.handleFullScreenKey(event) { return true }
                     if let window = model.playerView?.window, event.window === window {
                         pokeChrome()
                     }
+                    return false
                 }
-                return event
+                return consumed ? nil : event
             }
             DispatchQueue.main.async {
                 model.playerView?.window?.acceptsMouseMovedEvents = true

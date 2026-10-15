@@ -12,6 +12,26 @@ func arg(_ name: String) -> String? {
 }
 func flag(_ name: String) -> Bool { args.contains(name) }
 
+// A numeric flag that is present but unparseable is a usage error rather than
+// something to ignore: running with a different value than the one asked for is
+// harder to diagnose than refusing to start.
+func intFlag(_ name: String) -> Int? {
+    guard let v = arg(name) else { return nil }
+    guard let n = Int(v), n >= 0 else {
+        FileHandle.standardError.write(Data("\(name) expects a non-negative integer, got \"\(v)\"\n".utf8))
+        exit(2)
+    }
+    return n
+}
+func doubleFlag(_ name: String) -> Double? {
+    guard let v = arg(name) else { return nil }
+    guard let n = Double(v), n.isFinite else {
+        FileHandle.standardError.write(Data("\(name) expects a finite number, got \"\(v)\"\n".utf8))
+        exit(2)
+    }
+    return n
+}
+
 guard let filePath = arg("--file") else {
     FileHandle.standardError.write(Data("""
     usage: macvideoupscale --file <video> [--mode cnn|cnnDenoise|bypass|metalfx|realesrgan|off] [--scale 2|4] [--port 8090]
@@ -23,15 +43,41 @@ guard let filePath = arg("--file") else {
 }
 
 var cfg = PipelineController.Config()
-if let v = arg("--port"), let p = UInt16(v) { cfg.port = p }
-if let v = arg("--ring-mb"), let m = Int(v) { cfg.ringCapacityBytes = m << 20 }
-if let v = arg("--prebuffer-mb"), let m = Int(v) { cfg.prebufferBytes = m << 20 }
-if let v = arg("--lead-seconds"), let s = Double(v) { cfg.leadSeconds = max(5, s) }
+if let p = intFlag("--port") {
+    guard (1...65535).contains(p) else {
+        FileHandle.standardError.write(Data("--port must be between 1 and 65535, got \(p)\n".utf8))
+        exit(2)
+    }
+    cfg.port = UInt16(p)
+}
+// The shift is bounded so an absurd value errors out instead of trapping on
+// overflow like the script items below used to.
+if let m = intFlag("--ring-mb") {
+    guard m > 0, m <= Int.max >> 20 else {
+        FileHandle.standardError.write(Data("--ring-mb must be between 1 and \(Int.max >> 20)\n".utf8))
+        exit(2)
+    }
+    cfg.ringCapacityBytes = m << 20
+}
+if let m = intFlag("--prebuffer-mb") {
+    guard m <= Int.max >> 20 else {
+        FileHandle.standardError.write(Data("--prebuffer-mb must not exceed \(Int.max >> 20)\n".utf8))
+        exit(2)
+    }
+    cfg.prebufferBytes = m << 20
+}
+if let s = doubleFlag("--lead-seconds") { cfg.leadSeconds = max(5, s) }
 if flag("--no-audio") { cfg.audioEnabled = false }
-if let v = arg("--audio-index"), let i = Int(v) { cfg.audioStreamIndex = i }
-if let v = arg("--scale"), let n = Int(v), let f = UpscaleFactor(rawValue: n) { cfg.scaleFactor = f }
+if let i = intFlag("--audio-index") { cfg.audioStreamIndex = i }
+if let v = arg("--scale") {
+    guard let n = Int(v), let f = UpscaleFactor(rawValue: n) else {
+        FileHandle.standardError.write(Data("--scale must be 2 or 4, got \"\(v)\"\n".utf8))
+        exit(2)
+    }
+    cfg.scaleFactor = f
+}
 if flag("--subtitles") { cfg.burnSubtitles = true }
-if let v = arg("--sub-index"), let i = Int(v) { cfg.subtitleStreamIndex = i }
+if let i = intFlag("--sub-index") { cfg.subtitleStreamIndex = i }
 
 let kind = ScalerKind.parse(arg("--mode"))
 
@@ -40,12 +86,40 @@ guard let controller = try? PipelineController(config: cfg) else {
     exit(1)
 }
 
+// The store may post .failed more than once (every update reaches the handler),
+// so the stop-and-exit below must fire on the first one only.
+let failedExitGate = NSLock()
+var failedExitTaken = false
+
 controller.status.on_change = { snap in
     let enc = JSONEncoder()
     enc.outputFormatting = [.sortedKeys]
     if let line = try? enc.encode(snap), var s = String(data: line, encoding: .utf8) {
         s.append("\n")
         FileHandle.standardOutput.write(s.data(using: .utf8)!)
+    }
+    // A failed open (or a failure mid-stream) is reported as a status, not a
+    // thrown error, so the process has to leave here: parking in dispatchMain()
+    // below would hang a supervisor waiting on this exit code.
+    //
+    // This handler runs synchronously on the thread that called status.update,
+    // which holds `ctrl` for every failure posted from beginSessionLocked.
+    // controller.stop() locks that same non-recursive condition, so stopping
+    // here would self-deadlock and the process could no longer even be killed.
+    // Hop off the engine thread for the stop and the exit, gated so a repeated
+    // .failed post cannot stop twice.
+    if snap.state == .failed {
+        FileHandle.standardError.write(
+            Data("[cli] failed: \(snap.message.isEmpty ? "unknown error" : snap.message)\n".utf8))
+        failedExitGate.lock()
+        let first = !failedExitTaken
+        failedExitTaken = true
+        failedExitGate.unlock()
+        guard first else { return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            controller.stop()
+            exit(1)
+        }
     }
 }
 
@@ -72,18 +146,17 @@ termSrc.resume()
 if flag("--open-vlc") {
     DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) {
         // The engine owns this VLC so it can read the playback clock and reopen
-        // the stream itself after a seek.
+        // the stream itself after a seek. Skipped when the open already failed:
+        // there is no stream for VLC to play.
+        guard controller.status.current.state != .failed else { return }
         _ = controller.startPlayback()
     }
 }
 
-do {
-    try controller.open(file: URL(fileURLWithPath: filePath), kind: kind,
-                        startAt: Double(arg("--start") ?? "0") ?? 0)
-} catch {
-    FileHandle.standardError.write(Data("open failed: \(error)\n".utf8))
-    exit(1)
-}
+// open cannot throw: a file that fails to decode reports it through the
+// .failed status handled in on_change above.
+try? controller.open(file: URL(fileURLWithPath: filePath), kind: kind,
+                     startAt: doubleFlag("--start") ?? 0)
 
 // Headless control scripting for validation, e.g.
 //   --script "5:pause,8:resume,12:seek:60,20:mode:bypass"
@@ -93,7 +166,9 @@ if let script = arg("--script") {
     struct Action { let at: Double; let verb: String; let value: String?; var fired = false }
     var actions: [Action] = script.split(separator: ",").compactMap { item in
         let parts = item.split(separator: ":")
-        guard let at = Double(parts[0]) else { return nil }
+        // Count checked before the subscript: an item with no colon (or only
+        // colons) must be skipped, not trap on an out-of-range index.
+        guard parts.count >= 2, let at = Double(parts[0]) else { return nil }
         return Action(at: at, verb: String(parts[1]),
                       value: parts.count > 2 ? String(parts[2]) : nil)
     }

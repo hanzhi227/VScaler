@@ -18,7 +18,7 @@ import Metal
 /// is what lets a mode slower than real time play smoothly after a wait instead of
 /// stuttering — the deficit is paid once, up front, and then in bursts.
 ///
-/// Ring-addressed by frame index, like `SourceRing`: frame `i` always occupies
+/// Ring-addressed by frame index: frame `i` always occupies
 /// slot `i % capacity`, and `oldest...newest` is the window that is actually held.
 /// Indices are global and monotonic within a session, so a seek rebuilds the store
 /// rather than rewinding it.
@@ -38,6 +38,8 @@ final class FrameStore {
         let pb: CVPixelBuffer
         let cvTexture: CVMetalTexture
         let texture: MTLTexture
+        let leftPB: CVPixelBuffer?
+        let leftCVTexture: CVMetalTexture?
     }
 
     private let cond = NSCondition()
@@ -170,16 +172,6 @@ final class FrameStore {
         guard index >= oldest else { return }
         for i in oldest...min(index, newest) where i >= oldest { slots[i % capacity] = nil }
         oldest = min(index + 1, newest + 1)
-    }
-
-    /// Drops everything held without changing the sequence: the next push still
-    /// has to be `newest + 1`. Used when the paused redraw has already re-rendered
-    /// and re-queued the frames that were in here, so the copies in the store are
-    /// stale (they were rendered with the settings that were just changed).
-    func discardAll() {
-        cond.lock(); defer { cond.broadcast(); cond.unlock() }
-        for i in oldest...max(oldest, newest) where i <= newest { slots[i % capacity] = nil }
-        oldest = newest + 1
     }
 
     /// Shuts the store down and wakes everyone waiting on it.

@@ -17,12 +17,13 @@ public enum UpscaleMode: String, Sendable, CaseIterable {
     public var isCNN: Bool { self != .bilinear }
 }
 
-public enum Anime4KError: Error, CustomStringConvertible {
+public enum VideoUpscaleError: Error, CustomStringConvertible {
     case commandQueueUnavailable
     case libraryCompilationFailed(String)
     case functionNotFound(String)
     case pipelineCreationFailed(String)
     case textureAllocationFailed
+    case bufferAllocationFailed(String)
     case invalidInput(String)
     case pixelBufferFailed(String)
 
@@ -33,21 +34,23 @@ public enum Anime4KError: Error, CustomStringConvertible {
         case .functionNotFound(let s):      return "Metal function not found: \(s)"
         case .pipelineCreationFailed(let s): return "Pipeline state creation failed: \(s)"
         case .textureAllocationFailed:      return "MTLDevice.makeTexture() returned nil"
+        case .bufferAllocationFailed(let s): return "MTLDevice.makeBuffer() failed: \(s)"
         case .invalidInput(let s):          return "Invalid input: \(s)"
         case .pixelBufferFailed(let s):     return "CVPixelBuffer path failed: \(s)"
         }
     }
 }
 
-/// A synchronous, allocation-light Anime4K 2x upscaling pipeline.
+/// A synchronous, allocation-light 2x video upscaling pipeline.
 ///
-/// One instance owns its compute pipelines and a cache of intermediate
-/// `rgba16Float` feature textures sized to the current input. Feeding a stream
-/// at a constant resolution therefore performs no per-frame texture allocation
-/// on the intermediate path.
+/// CNN modes use weights from Anime4K v3.2 (`Upscale_CNN_x2_M` /
+/// `Upscale_Denoise_CNN_x2_M`). One instance owns its compute pipelines and a
+/// cache of intermediate `rgba16Float` feature textures sized to the current
+/// input. Feeding a stream at a constant resolution therefore performs no
+/// per-frame texture allocation on the intermediate path.
 ///
 /// Thread safety: not thread-safe. Create one instance per stream / per thread.
-public final class Anime4KPipeline {
+public final class VideoUpscalingPipeline {
 
     public let device: MTLDevice
     public let mode: UpscaleMode
@@ -81,7 +84,7 @@ public final class Anime4KPipeline {
         self.device = device
         self.mode = mode
         guard let queue = device.makeCommandQueue() else {
-            throw Anime4KError.commandQueueUnavailable
+            throw VideoUpscaleError.commandQueueUnavailable
         }
         self.commandQueue = queue
         self.pool = TexturePool(device: device)
@@ -90,17 +93,17 @@ public final class Anime4KPipeline {
         do {
             library = try device.makeLibrary(source: MetalKernels.source, options: nil)
         } catch {
-            throw Anime4KError.libraryCompilationFailed(String(describing: error))
+            throw VideoUpscaleError.libraryCompilationFailed(String(describing: error))
         }
 
         func makePSO(_ name: String) throws -> MTLComputePipelineState {
             guard let fn = library.makeFunction(name: name) else {
-                throw Anime4KError.functionNotFound(name)
+                throw VideoUpscaleError.functionNotFound(name)
             }
             do {
                 return try device.makeComputePipelineState(function: fn)
             } catch {
-                throw Anime4KError.pipelineCreationFailed("\(name): \(error)")
+                throw VideoUpscaleError.pipelineCreationFailed("\(name): \(error)")
             }
         }
 
@@ -122,7 +125,7 @@ public final class Anime4KPipeline {
         }
 
         if weights != nil {
-            buildWeightBuffers()
+            try buildWeightBuffers()
         }
     }
 
@@ -133,16 +136,25 @@ public final class Anime4KPipeline {
         depthToSpacePSO = try makePSO("depth_to_space_add")
     }
 
-    private func buildWeightBuffers() {
+    private func buildWeightBuffers() throws {
         guard let w = weights else { return }
         var arrays: [[Float]] = [w.conv1]
         arrays.append(contentsOf: w.mid)
         arrays.append(w.last)
-        weightBuffers = arrays.compactMap { arr in
-            arr.withUnsafeBytes { raw in
-                guard let base = raw.baseAddress else { return nil }
-                return device.makeBuffer(bytes: base, length: raw.count, options: .storageModeShared)
+        // A nil buffer used to be dropped by compactMap, so init could succeed
+        // with fewer than 8 buffers and only fail later in encodeCNN with a
+        // misleading "not initialised". Report the allocation failure here,
+        // where it actually happened.
+        weightBuffers = try arrays.map { arr -> MTLBuffer in
+            let buf = arr.withUnsafeBytes { raw in
+                raw.baseAddress.flatMap {
+                    device.makeBuffer(bytes: $0, length: raw.count, options: .storageModeShared)
+                }
             }
+            guard let buf else {
+                throw VideoUpscaleError.bufferAllocationFailed("CNN weight buffer, \(arr.count) floats")
+            }
+            return buf
         }
     }
 
@@ -166,7 +178,7 @@ public final class Anime4KPipeline {
         desc.usage = [.shaderRead, .shaderWrite]
         desc.storageMode = .private
         guard let out = device.makeTexture(descriptor: desc) else {
-            throw Anime4KError.textureAllocationFailed
+            throw VideoUpscaleError.textureAllocationFailed
         }
         try upscale(input, into: out)
         return out
@@ -180,14 +192,14 @@ public final class Anime4KPipeline {
     /// texture every frame to avoid per-frame allocations entirely.
     public func upscale(_ input: MTLTexture, into output: MTLTexture) throws {
         guard input.width > 0, input.height > 0 else {
-            throw Anime4KError.invalidInput("zero-sized input")
+            throw VideoUpscaleError.invalidInput("zero-sized input")
         }
         guard output.width == input.width * 2, output.height == input.height * 2 else {
-            throw Anime4KError.invalidInput(
+            throw VideoUpscaleError.invalidInput(
                 "output must be 2x input (got \(output.width)x\(output.height) for \(input.width)x\(input.height))")
         }
         guard output.usage.contains(.shaderWrite) else {
-            throw Anime4KError.invalidInput("output texture is missing .shaderWrite usage")
+            throw VideoUpscaleError.invalidInput("output texture is missing .shaderWrite usage")
         }
 
         // retainedReferences = false: the caller guarantees referenced textures
@@ -197,10 +209,10 @@ public final class Anime4KPipeline {
         let cbDesc = MTLCommandBufferDescriptor()
         cbDesc.retainedReferences = false
         guard let cb = commandQueue.makeCommandBuffer(descriptor: cbDesc) else {
-            throw Anime4KError.commandQueueUnavailable
+            throw VideoUpscaleError.commandQueueUnavailable
         }
         guard let enc = cb.makeComputeCommandEncoder() else {
-            throw Anime4KError.commandQueueUnavailable
+            throw VideoUpscaleError.commandQueueUnavailable
         }
 
         switch mode {
@@ -217,7 +229,7 @@ public final class Anime4KPipeline {
         // (or use a shared event) instead of blocking here.
         cb.waitUntilCompleted()
         if let err = cb.error {
-            throw Anime4KError.invalidInput("command buffer error: \(err)")
+            throw VideoUpscaleError.invalidInput("command buffer error: \(err)")
         }
     }
 
@@ -233,7 +245,7 @@ public final class Anime4KPipeline {
 
     private func encodeBilinear(_ enc: MTLComputeCommandEncoder,
                                 input: MTLTexture, output: MTLTexture) throws {
-        guard let pso = bilinearPSO else { throw Anime4KError.functionNotFound("bilinear2x") }
+        guard let pso = bilinearPSO else { throw VideoUpscaleError.functionNotFound("bilinear2x") }
         enc.setComputePipelineState(pso)
         enc.setTexture(input, index: 0)
         enc.setTexture(output, index: 1)
@@ -246,13 +258,13 @@ public final class Anime4KPipeline {
               let c1 = conv1PSO, let cm = convMidPSO,
               let cl = convLastPSO, let d2s = depthToSpacePSO,
               weightBuffers.count == 8 else {
-            throw Anime4KError.pipelineCreationFailed("CNN resources not initialised")
+            throw VideoUpscaleError.pipelineCreationFailed("CNN resources not initialised")
         }
 
         let W = input.width
         let H = input.height
         let feats = pool.featureTextures(width: W, height: H, count: 8)
-        guard feats.count == 8 else { throw Anime4KError.textureAllocationFailed }
+        guard feats.count == 8 else { throw VideoUpscaleError.textureAllocationFailed }
 
         // Pass 1: user input -> feat[0]
         enc.setComputePipelineState(c1)
@@ -304,13 +316,13 @@ public final class Anime4KPipeline {
                         outputPool: CVPixelBufferPool?,
                         outputFormat: OSType = kCVPixelFormatType_32BGRA) throws -> CVPixelBuffer {
         guard outputFormat == kCVPixelFormatType_32BGRA else {
-            throw Anime4KError.pixelBufferFailed("only 32BGRA output is supported")
+            throw VideoUpscaleError.pixelBufferFailed("only 32BGRA output is supported")
         }
         guard CVPixelBufferGetPixelFormatType(input) == kCVPixelFormatType_32BGRA else {
-            throw Anime4KError.pixelBufferFailed("only 32BGRA input is supported")
+            throw VideoUpscaleError.pixelBufferFailed("only 32BGRA input is supported")
         }
         guard CVPixelBufferIsPlanar(input) == false else {
-            throw Anime4KError.pixelBufferFailed("planar input is not supported")
+            throw VideoUpscaleError.pixelBufferFailed("planar input is not supported")
         }
         let cache = try metalTextureCache()
 
@@ -322,14 +334,14 @@ public final class Anime4KPipeline {
             kCFAllocatorDefault, cache, input, nil, .bgra8Unorm, w, h, 0, &cvIn)
         guard s0 == kCVReturnSuccess, let cvInRef = cvIn,
               let inTex = CVMetalTextureGetTexture(cvInRef) else {
-            throw Anime4KError.pixelBufferFailed("failed to wrap input (status \(s0))")
+            throw VideoUpscaleError.pixelBufferFailed("failed to wrap input (status \(s0))")
         }
 
         var outPB: CVPixelBuffer?
         if let pool = outputPool {
             let s = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &outPB)
             guard s == kCVReturnSuccess else {
-                throw Anime4KError.pixelBufferFailed("pool allocation failed (status \(s))")
+                throw VideoUpscaleError.pixelBufferFailed("pool allocation failed (status \(s))")
             }
         } else {
             let attrs: [String: Any] = [
@@ -340,11 +352,11 @@ public final class Anime4KPipeline {
             let s = CVPixelBufferCreate(kCFAllocatorDefault, w * 2, h * 2, outputFormat,
                                         attrs as CFDictionary, &outPB)
             guard s == kCVReturnSuccess else {
-                throw Anime4KError.pixelBufferFailed("CVPixelBufferCreate failed (status \(s))")
+                throw VideoUpscaleError.pixelBufferFailed("CVPixelBufferCreate failed (status \(s))")
             }
         }
         guard let outBuffer = outPB else {
-            throw Anime4KError.pixelBufferFailed("nil output pixel buffer")
+            throw VideoUpscaleError.pixelBufferFailed("nil output pixel buffer")
         }
 
         var cvOut: CVMetalTexture?
@@ -352,7 +364,7 @@ public final class Anime4KPipeline {
             kCFAllocatorDefault, cache, outBuffer, nil, .bgra8Unorm, w * 2, h * 2, 0, &cvOut)
         guard s1 == kCVReturnSuccess, let cvOutRef = cvOut,
               let outTex = CVMetalTextureGetTexture(cvOutRef) else {
-            throw Anime4KError.pixelBufferFailed("failed to wrap output (status \(s1))")
+            throw VideoUpscaleError.pixelBufferFailed("failed to wrap output (status \(s1))")
         }
 
         try upscale(inTex, into: outTex)   // synchronous; cvIn/cvOut stay alive here
@@ -365,7 +377,7 @@ public final class Anime4KPipeline {
         var created: CVMetalTextureCache?
         let status = CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &created)
         guard status == kCVReturnSuccess, let c = created else {
-            throw Anime4KError.pixelBufferFailed("CVMetalTextureCacheCreate failed (status \(status))")
+            throw VideoUpscaleError.pixelBufferFailed("CVMetalTextureCacheCreate failed (status \(status))")
         }
         textureCache = c
         return c

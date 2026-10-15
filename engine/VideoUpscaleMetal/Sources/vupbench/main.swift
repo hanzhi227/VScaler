@@ -1,11 +1,11 @@
-import Anime4KMetal
+import VideoUpscaleMetal
 import CoreGraphics
 import Foundation
 import ImageIO
 import Metal
 import UniformTypeIdentifiers
 
-// an4kbench --input <png> --output <png> --mode bilinear|cnnX2M [--iters N]
+// vupbench --input <png> --output <png> --mode bilinear|cnnX2M [--iters N]
 //           [--repeat-to-1080] [--out-format bgra8|rgba16f]
 
 struct Options {
@@ -51,7 +51,7 @@ func parseOptions() -> Options {
             default: fail("unknown --out-format (expected bgra8|rgba16f)")
             }
         case "-h", "--help":
-            print("usage: an4kbench --input <png> --output <png> --mode bilinear|cnnX2M|cnnDenoiseX2M [--iters N] [--repeat-to-1080] [--out-format bgra8|rgba16f]")
+            print("usage: vupbench --input <png> --output <png> --mode bilinear|cnnX2M|cnnDenoiseX2M [--iters N] [--repeat-to-1080] [--out-format bgra8|rgba16f]")
             exit(0)
         default:
             fail("unknown argument \(a)")
@@ -202,9 +202,9 @@ if outFormat == .rgba16Float {
                          width: outW, height: outH)
 }
 
-let pipeline: Anime4KPipeline
+let pipeline: VideoUpscalingPipeline
 do {
-    pipeline = try Anime4KPipeline(device: device, mode: opts.mode)
+    pipeline = try VideoUpscalingPipeline(device: device, mode: opts.mode)
 } catch {
     fail("pipeline init failed: \(error)")
 }

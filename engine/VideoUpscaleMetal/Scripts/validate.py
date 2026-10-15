@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Validation for the Anime4K Metal port.
+Validation for the video upscaling Metal port.
 
 Checks:
   1. output dimensions are exactly 2x input
@@ -149,7 +149,8 @@ def main():
 
     # flat-region fidelity: CNN must reproduce flat cel colour (weight sanity)
     flat = (200, 780, 500, 860)  # inside the light-grey calibration patch, 2x coords
-    report["flat_region_src_mean"] = round(float(cnn[flat[1]:flat[3], flat[0]:flat[2]].mean()), 3)
+    flat_src = tuple(v // 2 for v in flat)  # the same patch in the 1x source's coords
+    report["flat_region_src_mean"] = round(float(src[flat_src[1]:flat_src[3], flat_src[0]:flat_src[2]].mean()), 3)
     report["flat_region_cnn_mean"] = round(float(cnn[flat[1]:flat[3], flat[0]:flat[2]].mean()), 3)
     report["flat_region_bilinear_mean"] = round(float(bil[flat[1]:flat[3], flat[0]:flat[2]].mean()), 3)
 

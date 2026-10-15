@@ -6,6 +6,7 @@ public enum RealESRGANError: Error, CustomStringConvertible {
     case metalUnavailable
     case weightsUndecodable
     case graphBuildFailed(String)
+    case graphExecutionFailed(String)
     case geometryMismatch(String)
     case bufferAllocationFailed(String)
 
@@ -14,6 +15,7 @@ public enum RealESRGANError: Error, CustomStringConvertible {
         case .metalUnavailable:            return "no Metal device or command queue"
         case .weightsUndecodable:          return "the embedded weight blob did not decode"
         case .graphBuildFailed(let s):     return "MPSGraph could not build the network: \(s)"
+        case .graphExecutionFailed(let s): return "MPSGraph execution failed: \(s)"
         case .geometryMismatch(let s):     return "invalid geometry: \(s)"
         case .bufferAllocationFailed(let s): return "buffer allocation failed: \(s)"
         }
@@ -72,6 +74,15 @@ public final class RealESRGANPipeline {
         self.queue = q
         self.graphDevice = MPSGraphDevice(mtlDevice: device)
 
+        // shuffleResidual hardwires the pixel-shuffle read to 3 colour planes
+        // of 16 sub-pixel slots each, so a checkpoint whose final convolution
+        // is anything other than 48 channels would be read past the end of the
+        // feature buffer. Refuse it here rather than execute it.
+        guard model.outputChannels == 48 else {
+            throw RealESRGANError.geometryMismatch(
+                "\(model.name) ends in \(model.outputChannels) output channels, shuffleResidual needs 48")
+        }
+
         // The blob is one wrapped multi-line literal, so the newlines have to be
         // ignored rather than treated as bad input.
         guard let blob = Data(base64Encoded: model.blobBase64,
@@ -106,14 +117,23 @@ public final class RealESRGANPipeline {
         let w = g.width, h = g.height
         let graph = MPSGraph()
 
+        // Data.subdata traps on an out-of-range slice, and init only checked
+        // the blob's total size, so every per-conv slice is bounds-checked.
+        func slice(_ offset: Int, _ byteCount: Int) throws -> Data {
+            guard offset >= 0, byteCount >= 0, offset + byteCount <= weightBlob.count else {
+                throw RealESRGANError.weightsUndecodable
+            }
+            return weightBlob.subdata(in: offset ..< offset + byteCount)
+        }
+
         let src = graph.placeholder(shape: [1, NSNumber(value: h), NSNumber(value: w), 4],
                                     dataType: .float16, name: "src")
         var x = src
 
         for conv in model.convs {
             let wCount = conv.outCh * conv.inCh * 9
-            let wData = weightBlob.subdata(in: conv.weightOffset ..< conv.weightOffset + wCount * 2)
-            let bData = weightBlob.subdata(in: conv.biasOffset ..< conv.biasOffset + conv.outCh * 2)
+            let wData = try slice(conv.weightOffset, wCount * 2)
+            let bData = try slice(conv.biasOffset, conv.outCh * 2)
 
             let wTensor = graph.constant(wData,
                                          shape: [NSNumber(value: conv.outCh),
@@ -136,7 +156,7 @@ public final class RealESRGANPipeline {
                 // PReLU(x) = max(x,0) + slope * min(x,0), and
                 // min(x,0) = -max(-x,0), so this is two ReLUs and a subtraction
                 // rather than a scalar constant MPSGraph would have to broadcast.
-                let sData = weightBlob.subdata(in: conv.actOffset ..< conv.actOffset + conv.outCh * 2)
+                let sData = try slice(conv.actOffset, conv.outCh * 2)
                 let sTensor = graph.constant(sData, shape: [NSNumber(value: conv.outCh)],
                                              dataType: .float16)
                 let pos = graph.reLU(with: x, name: nil)
@@ -183,11 +203,15 @@ public final class RealESRGANPipeline {
                 "4x is fixed: got \(src.width)x\(src.height) -> \(dst.width)x\(dst.height)")
         }
 
-        let cb = queue.makeCommandBuffer()
-        cb?.label = "real-esrgan frame->tensor"
-        encode(framePSO, into: cb, src: src, dst: nil, buffer: inputBuffer,
-               width: src.width, height: src.height)
-        cb?.commit()
+        guard let cb = queue.makeCommandBuffer() else {
+            throw RealESRGANError.metalUnavailable
+        }
+        cb.label = "real-esrgan frame->tensor"
+        try encode(framePSO, into: cb, src: src, dst: nil, buffer: inputBuffer,
+                   width: src.width, height: src.height)
+        cb.commit()
+        cb.waitUntilCompleted()
+        if let err = cb.error { throw err }
 
         let inTD = MPSGraphTensorData(inputBuffer,
                                       shape: [1, NSNumber(value: src.height),
@@ -204,24 +228,35 @@ public final class RealESRGANPipeline {
         // the player hands us a frame and expects the output to be there.
         let execDesc = MPSGraphExecutableExecutionDescriptor()
         execDesc.waitUntilCompleted = true
-        _ = executable.run(with: queue, inputs: [inTD], results: [outTD],
-                           executionDescriptor: execDesc)
+        // run(with:inputs:) has no throwing form: an execution failure comes
+        // back through the descriptor's completion handler, so it is captured
+        // here and raised below rather than left to corrupt the frame quietly.
+        var graphError: Error?
+        execDesc.completionHandler = { _, error in graphError = error }
+        let results = executable.run(with: queue, inputs: [inTD], results: [outTD],
+                                     executionDescriptor: execDesc)
+        if let err = graphError { throw RealESRGANError.graphExecutionFailed("\(err)") }
+        if results.count != 1 { throw RealESRGANError.graphExecutionFailed("no result tensor") }
 
-        let cb2 = queue.makeCommandBuffer()
-        cb2?.label = "real-esrgan tensor->4x"
-        encode(shufflePSO, into: cb2, src: src, dst: dst, buffer: featureBuffer,
-               width: dst.width, height: dst.height)
-        // The queue is FIFO, so completing this buffer means the graph's work is
-        // done too — one synchronisation point per frame rather than three.
-        cb2?.commit()
-        cb2?.waitUntilCompleted()
-        if let err = cb2?.error { throw err }
+        guard let cb2 = queue.makeCommandBuffer() else {
+            throw RealESRGANError.metalUnavailable
+        }
+        cb2.label = "real-esrgan tensor->4x"
+        try encode(shufflePSO, into: cb2, src: src, dst: dst, buffer: featureBuffer,
+                   width: dst.width, height: dst.height)
+        // The queue is FIFO, so completing this buffer means the graph's work
+        // is done too, which is why the graph needs no wait of its own.
+        cb2.commit()
+        cb2.waitUntilCompleted()
+        if let err = cb2.error { throw err }
     }
 
-    private func encode(_ pso: MTLComputePipelineState, into cb: MTLCommandBuffer?,
+    private func encode(_ pso: MTLComputePipelineState, into cb: MTLCommandBuffer,
                         src: MTLTexture, dst: MTLTexture?, buffer: MTLBuffer,
-                        width: Int, height: Int) {
-        guard let cb, let enc = cb.makeComputeCommandEncoder() else { return }
+                        width: Int, height: Int) throws {
+        guard let enc = cb.makeComputeCommandEncoder() else {
+            throw RealESRGANError.metalUnavailable
+        }
         enc.setComputePipelineState(pso)
         enc.setTexture(src, index: 0)
         if let dst { enc.setTexture(dst, index: 1) }
