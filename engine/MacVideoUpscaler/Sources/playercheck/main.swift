@@ -24,6 +24,7 @@ struct HostedSurface: NSViewRepresentable {
 // Script verbs: pause, resume, click (a synthetic mouse click on the picture),
 // seek:<s>, seekrel:<s>, mode:<cnn|bypass|denoise|metalfx>, scale:<2|4>,
 // audio:<ordinal>, compare:<on|off>, compareleft:<cnn|denoise|bypass|metalfx>,
+// subfile:<path>, sub:<off|ordinal>, open:<path>,
 // split:<0..1>, dragdivider:<viewFraction> (a synthetic press-and-drag on the
 // divider line), readback (write the frame the renderer is *showing* as a PNG —
 // the paused redraw changes what is presented, which a dump of the frames rendered
@@ -114,6 +115,11 @@ if flag("--swiftui") {
     window = host
 }
 _ = window
+if flag("--window") {
+    app.finishLaunching()
+    window?.makeKeyAndOrderFront(nil)
+    app.activate(ignoringOtherApps: true)
+}
 
 var lastStatus: StatusSnapshot?
 
@@ -175,6 +181,7 @@ func dragDivider(to viewFraction: CGFloat, on target: NSView, from startViewX: C
 // inspected without a window (this environment has no Screen Recording access).
 let dumpDir = URL(fileURLWithPath: arg("--dump-dir") ?? NSTemporaryDirectory())
 // --dump <n>: first n frames. --dump-at "60,150": specific frame indices.
+// --dump-sessions: prefix captures with their session ID across seeks/restarts.
 let dumpFirst = arg("--dump").flatMap(Int.init)
 let dumpAt = Set((arg("--dump-at") ?? "").split(separator: ",").compactMap { Int($0) })
 if dumpFirst != nil || !dumpAt.isEmpty {
@@ -187,7 +194,9 @@ if dumpFirst != nil || !dumpAt.isEmpty {
         let wanted = dumpAt.contains(idx) || (dumpFirst.map { dumped < $0 } ?? false)
         guard wanted else { return }
         dumped += 1
-        let url = dumpDir.appendingPathComponent(String(format: "frame_%04d.png", idx))
+            let prefix = flag("--dump-sessions")
+                ? String(format: "session_%04d_", controller.status.current.sessionId) : ""
+            let url = dumpDir.appendingPathComponent(prefix + String(format: "frame_%04d.png", idx))
         if FrameCapture.writePNG(pb, to: url) {
             FileHandle.standardError.write(Data("[dump] \(url.path)\n".utf8))
         }
@@ -211,8 +220,10 @@ var readbacks = 0
 if let script = arg("--script") {
     struct Action { let at: Double; let verb: String; let value: String?; var fired = false }
     var actions: [Action] = script.split(separator: ",").compactMap { item in
-        let parts = item.split(separator: ":")
-        guard let at = Double(parts[0]), parts.count >= 2 else { return nil }
+        let parts = item.split(separator: ":", maxSplits: 2)
+        // Count checked before the subscript: an item with no colon (or only
+        // colons) must be skipped, not trap on an out-of-range index.
+        guard parts.count >= 2, let at = Double(parts[0]) else { return nil }
         return Action(at: at, verb: String(parts[1]),
                       value: parts.count > 2 ? String(parts[2]) : nil)
     }
@@ -225,6 +236,8 @@ if let script = arg("--script") {
             actions[i].fired = true
             let a = actions[i]
             let before = controller.playbackSeconds
+            let statusBefore = controller.status.current
+            var controlError = ""
             switch a.verb {
             case "pause": controller.pause()
             case "resume": controller.resume()
@@ -233,6 +246,19 @@ if let script = arg("--script") {
             case "seekrel": controller.seek(by: Double(a.value ?? "0") ?? 0)
             case "mode": controller.setKind(ScalerKind.parse(a.value))
             case "audio": controller.setAudioTrack(Int(a.value ?? "0") ?? 0)
+            case "subfile":
+                do {
+                    if let video = controller.currentFile {
+                        try controller.loadSubtitleFile(URL(fileURLWithPath: a.value ?? ""), for: video)
+                    }
+                }
+                catch { controlError = error.localizedDescription }
+            case "sub":
+                if a.value == "off" { controller.setSubtitles(false) }
+                else { controller.setSubtitleTrack(Int(a.value ?? "0") ?? 0) }
+            case "open":
+                do { try controller.open(file: URL(fileURLWithPath: a.value ?? ""), kind: kind) }
+                catch { controlError = error.localizedDescription }
             case "compare": controller.setCompare((a.value ?? "on") != "off")
             case "compareleft": controller.setCompareLeft(ScalerKind.parse(a.value))
             case "split": controller.setCompareSplit(Double(a.value ?? "0.5") ?? 0.5)
@@ -259,7 +285,8 @@ if let script = arg("--script") {
                     FileHandle.standardError.write(Data(
                         "[readback] \(url.path) \(CVPixelBufferGetWidth(pb))x\(CVPixelBufferGetHeight(pb)) ok=\(ok)\n".utf8))
                 } else {
-                    FileHandle.standardError.write(Data("[readback] no presented frame\n".utf8))
+                    FileHandle.standardError.write(Data(
+                        "[readback] no presented frame active=\(app.isActive) visible=\(window?.occlusionState.contains(.visible) == true) \(controller.status.current.renderStatus)\n".utf8))
                 }
             default: break
             }
@@ -268,6 +295,10 @@ if let script = arg("--script") {
                 "value": a.value ?? "",
                 "playback_before": before,
                 "playback_after": controller.playbackSeconds,
+                "state_before": statusBefore.state.rawValue,
+                "error": controlError,
+                "audio_frames_before": statusBefore.audioFramesEnqueued,
+                "session_before": statusBefore.sessionId,
                 "frames": controller.status.current.framesProcessed,
                 "state": controller.status.current.state.rawValue,
                 "compare_split": controller.compareSplitFraction,

@@ -45,6 +45,11 @@ final class FrameStore {
     private var oldest = 0
     private var newest = -1
     private var closed = false
+    /// Set once the producer has run off the end of the source: no frame after
+    /// `newest` will ever arrive. Unlike `closed`, the held frames stay readable,
+    /// so a consumer waiting for a fill level this store can no longer reach is
+    /// released to drain what is here instead of waiting forever.
+    private var producerFinished = false
 
     /// Frames this store can hold, i.e. the maximum read-ahead in frames.
     let capacity: Int
@@ -138,11 +143,23 @@ final class FrameStore {
         return nil
     }
 
-    /// Blocks until at least `target` frames are held, or the store closes.
+    /// Records that the producer has reached the end of the source and wakes
+    /// anyone waiting for a count that can now never be reached. Unlike `close`
+    /// the held frames remain readable, so the consumer can play them out.
+    func finishProducing() {
+        cond.lock(); defer { cond.broadcast(); cond.unlock() }
+        producerFinished = true
+    }
+
+    /// Blocks until at least `target` frames are held, the store closes, or the
+    /// producer finishes short of the target. Returns whether the target was
+    /// met: a false with the store still open means the producer has run off the
+    /// end of the source, so the caller should drain what is held rather than
+    /// wait for a refill that will never come.
     func waitForCount(_ target: Int) -> Bool {
         cond.lock(); defer { cond.unlock() }
-        while !closed && heldLocked < target { cond.wait() }
-        return !closed
+        while !closed && !producerFinished && heldLocked < target { cond.wait() }
+        return heldLocked >= target
     }
 
     /// Marks `index` as handed to the layer. Everything up to it is dropped: the

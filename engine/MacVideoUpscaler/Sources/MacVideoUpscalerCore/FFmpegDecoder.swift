@@ -272,6 +272,10 @@ final class FFmpegDecoder {
         let video = "0:\(meta.videoStreamIndex)"
         if let sub = subtitle {
             if sub.track.bitmap {
+                if let externalURL = sub.externalURL {
+                    // Keep cues that began before a seek but are still visible.
+                    args += ["-itsoffset", String(format: "%.3f", -max(0, seconds)), "-i", externalURL.path]
+                }
                 // A bitmap subpicture is a picture layer: its position comes from
                 // a window defined against the *source* frame, so it is composited
                 // before the rotation and the finished frame is turned as a whole.
@@ -286,7 +290,8 @@ final class FFmpegDecoder {
                 let quarterTurn = meta.rotation == 90 || meta.rotation == 270
                 let srcW = quarterTurn ? meta.height : meta.width
                 let srcH = quarterTurn ? meta.width : meta.height
-                var graph = "[0:\(sub.track.index)]scale=\(srcW):\(srcH):flags=bicubic[sub];"
+                let input = sub.externalURL == nil ? 0 : 1
+                var graph = "[\(input):\(sub.track.index)]scale=\(srcW):\(srcH):flags=bicubic[sub];"
                     + "[\(video)][sub]overlay=format=auto:eof_action=repeat[v0]"
                 if let rotate = rotateFilter { graph += ";[v0]\(rotate)[v]" }
                 args += [

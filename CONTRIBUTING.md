@@ -55,6 +55,24 @@ file, selecting a mode and scale, synthetic clicks, and frame dumps. See
 "Options" in the technical notes. The `scripts/check_*.py` tools verify A/V sync,
 playback rate, subtitles, formats and scene cuts against a source file.
 
+Run `python3 scripts/check_pause_resume.py` after a release build to check long
+pauses, audio/video resumption, seeking while paused, and natural end of playback.
+It generates a short synthetic clip and runs the embedded player with muted audio.
+
+Run `python3 scripts/check_chrome.py` to check idle controls, mouse movement,
+pause/resume, and fullscreen entry/exit through the GUI's diagnostic hooks.
+It opens a silent synthetic clip for 35 seconds. Cursor rendering still needs
+a manual check with the pointer over the video.
+
+Run `python3 scripts/check_external_subtitles.py` to verify external SRT, VTT,
+ASS, and SSA files against rendered pixels, including track switching,
+invalid files, paused loading, seeking, and clearing subtitles on a new video.
+
+Run `python3 scripts/check_vobsub.py` to verify external `.idx`/`.sub` pairs,
+including rendered pixels when seeking into a cue, blank intervals, Off,
+missing companions, and a new video. It requires the local bitmap subtitle
+fixture at `test-media/segments/subs_bitmap.mkv`, or its path as an argument.
+
 If your change alters the picture or playback, include the command you ran and
 its measurements. The technical notes show the format used for earlier runs.
 

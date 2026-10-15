@@ -35,24 +35,36 @@ final class TextSubtitleRenderer {
 
     /// Extracts the subtitle stream as SRT via ffmpeg and parses it.
     static func load(url: URL, ordinal: Int = 0) -> TextSubtitleRenderer? {
+        guard let cues = loadCues(url: url, ordinal: ordinal) else { return nil }
+        let meta = (try? FFmpegDecoder(url: url))?.meta
+        return TextSubtitleRenderer(cues: cues,
+                                    sourceWidth: meta?.width ?? 1920,
+                                    sourceHeight: meta?.height ?? 1080)
+    }
+
+    static func loadCues(url: URL, ordinal: Int = 0) -> [Cue]? {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: FFmpegDecoder.ffmpegPath)
         p.arguments = ["-v", "error", "-i", url.path,
                        "-map", "0:s:\(ordinal)", "-f", "srt", "pipe:1"]
         let out = Pipe()
+        let err = Pipe()
         p.standardOutput = out
-        p.standardError = Pipe()
+        p.standardError = err
         p.standardInput = FileHandle.nullDevice   // never touch the controlling terminal
         guard (try? p.run()) != nil else { return nil }
+        // Drain stderr concurrently (see FFmpegDecoder.probe): a child blocked
+        // on a full stderr pipe never closes stdout, hanging the read below.
+        DispatchQueue.global(qos: .utility).async {
+            _ = err.fileHandleForReading.readDataToEndOfFile()
+        }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         Subprocess.wait(for: p, timeout: 10)
-        guard let text = String(data: data, encoding: .utf8), !text.isEmpty else { return nil }
+        guard !p.isRunning, p.terminationStatus == 0,
+              let text = String(data: data, encoding: .utf8), !text.isEmpty else { return nil }
         let cues = parseSRT(text)
         guard !cues.isEmpty else { return nil }
-        let meta = (try? FFmpegDecoder(url: url))?.meta
-        return TextSubtitleRenderer(cues: cues,
-                                    sourceWidth: meta?.width ?? 1920,
-                                    sourceHeight: meta?.height ?? 1080)
+        return cues
     }
 
     static func parseSRT(_ text: String) -> [Cue] {
@@ -63,7 +75,8 @@ final class TextSubtitleRenderer {
             pattern: #"(\d+):(\d+):(\d+)[,.](\d+)\s*-->\s*(\d+):(\d+):(\d+)[,.](\d+)"#)
         for block in blocks {
             let lines = block.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-            guard let timeLine = lines.first(where: { $0.contains("-->") }) else { continue }
+            guard let timeIdx = lines.firstIndex(where: { $0.contains("-->") }) else { continue }
+            let timeLine = lines[timeIdx]
             let ns = timeLine as NSString
             guard let m = timeRe.firstMatch(in: timeLine,
                                             range: NSRange(location: 0, length: ns.length)) else { continue }
@@ -73,10 +86,13 @@ final class TextSubtitleRenderer {
             }
             let start = g(1) * 3600 + g(2) * 60 + g(3) + g(4) / 1000
             let end = g(5) * 3600 + g(6) * 60 + g(7) + g(8) / 1000
-            let body = lines
-                .filter { !$0.contains("-->") }
+            // The body is everything AFTER the timing line; the SRT cue index is
+            // whatever sits BEFORE it. Filtering numeric lines anywhere in the
+            // block would also swallow a cue whose whole text is a number
+            // ("1", "007"), so the index is dropped by position instead.
+            let body = lines.dropFirst(timeIdx + 1)
                 .map { stripTags($0).trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty && Int($0) == nil }
+                .filter { !$0.isEmpty }
             if !body.isEmpty {
                 cues.append(Cue(start: start, end: end, lines: body))
             }

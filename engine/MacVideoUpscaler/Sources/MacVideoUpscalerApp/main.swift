@@ -46,6 +46,7 @@ final class AppModel: ObservableObject {
     /// Whether the window is in full screen, so the menu item can say which way
     /// it will go and the diagnostics can report it.
     @Published var isFullScreen = false
+    private var windowedPresentationOptions: NSApplication.PresentationOptions?
     @Published private(set) var queue: [URL] = []
     @Published private(set) var currentIndex: Int?
 
@@ -61,6 +62,12 @@ final class AppModel: ObservableObject {
     private var displaySleepActivity: NSObjectProtocol?
     private var handledSessionId = 0
     private var clickTimers: [DispatchSourceTimer] = []
+    /// The stutter note `apply` posted into `lastError`, if one is up. Only the
+    /// message a snapshot posted itself may be withdrawn by a snapshot: checked
+    /// against `lastError` before clearing, so a user-facing error set in the
+    /// meantime (a folder that could not be read, say) stays until the next
+    /// user action replaces or clears it.
+    private var stutterNote: String?
 
     init() {
         var ctrl: PlayerController?
@@ -119,10 +126,19 @@ final class AppModel: ObservableObject {
         }
         if let k = ScalerKind.allCases.first(where: { $0.displayName == snap.mode }) { kind = k }
         if snap.state == .processing && snap.realtimeRatio < 0.95 && snap.framesProcessed > 60 {
-            lastError = String(format: "Enhancing at %.2f× realtime — the picture will stutter. "
-                               + "Switch to Bypass or 2×.", snap.realtimeRatio)
-        } else {
-            lastError = nil
+            // The stutter note is recomputed from each snapshot, so it follows
+            // the live ratio. Only it may be withdrawn by a snapshot: a
+            // user-facing error set elsewhere must survive playback and wait
+            // for the next user action.
+            let note = String(format: "Enhancing at %.2f× realtime — the picture will stutter. "
+                              + "Switch to Bypass or 2×.", snap.realtimeRatio)
+            lastError = note
+            stutterNote = note
+        } else if let note = stutterNote {
+            // Withdraw the note only while `lastError` still holds it: an error
+            // posted since (an unreadable folder, say) is not ours to clear.
+            if lastError == note { lastError = nil }
+            stutterNote = nil
         }
     }
 
@@ -141,6 +157,31 @@ final class AppModel: ObservableObject {
         panel.message = "Choose videos to add to the queue"
         guard panel.runModal() == .OK else { return }
         addToQueue(panel.urls)
+    }
+
+    func openSubtitlePanel() {
+        guard engine != nil, let index = currentIndex, queue.indices.contains(index) else { return }
+        let video = queue[index]
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = ["srt", "vtt", "ass", "ssa", "idx", "sub"].compactMap { UTType(filenameExtension: $0) }
+        let folder = video.deletingLastPathComponent()
+        let subs = folder.appendingPathComponent("subs", isDirectory: true)
+        panel.directoryURL = (try? subs.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true ? subs : folder
+        panel.message = "Choose subtitles for the current video. Keep .idx and .sub files together."
+        panel.prompt = "Load Subtitles"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let engine = self?.engine else { return }
+            do {
+                try engine.loadSubtitleFile(url, for: video)
+                DispatchQueue.main.async { self?.lastError = nil }
+            } catch {
+                let message = error.localizedDescription
+                DispatchQueue.main.async { self?.lastError = message }
+            }
+        }
     }
 
     func openFolderPanel() {
@@ -360,7 +401,7 @@ final class AppModel: ObservableObject {
         if ordinal < 0 { engine?.setSubtitles(false) } else { engine?.setSubtitleTrack(ordinal) }
     }
 
-    func toggleFullScreen() { NSApp.keyWindow?.toggleFullScreen(nil) }
+    func toggleFullScreen() { playerView?.window?.toggleFullScreen(nil) }
 
     /// Track full screen from the window's own notifications rather than from the
     /// calls that request it: entering and leaving are asynchronous and can also be
@@ -368,13 +409,38 @@ final class AppModel: ObservableObject {
     /// thing that knows the real state.
     private func observeFullScreen() {
         let center = NotificationCenter.default
+        center.addObserver(forName: NSWindow.willEnterFullScreenNotification, object: nil,
+                           queue: .main) { [weak self] note in
+            MainActor.assumeIsolated {
+                guard let self, let window = note.object as? NSWindow,
+                      window === self.playerView?.window else { return }
+                self.windowedPresentationOptions = NSApp.presentationOptions
+            }
+        }
         let pairs: [(NSNotification.Name, Bool)] = [
             (NSWindow.didEnterFullScreenNotification, true),
             (NSWindow.didExitFullScreenNotification, false),
         ]
         for (name, entered) in pairs {
-            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.isFullScreen = entered }
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                MainActor.assumeIsolated {
+                    guard let self, let window = note.object as? NSWindow,
+                          window === self.playerView?.window else { return }
+                    self.isFullScreen = entered
+                    if entered {
+                        var options = NSApp.presentationOptions
+                        options.subtract([.hideMenuBar, .hideDock])
+                        options.formUnion([.autoHideMenuBar, .autoHideDock])
+                        NSApp.presentationOptions = options
+                    } else if let options = self.windowedPresentationOptions {
+                        NSApp.presentationOptions = options
+                        self.windowedPresentationOptions = nil
+                    }
+                    if ProcessInfo.processInfo.environment["MACVIDEOUPSCALER_DIAG"] == "1" {
+                        NSLog("[fullscreen] entered=%d menuAutoHide=%d", entered ? 1 : 0,
+                              NSApp.presentationOptions.contains(.autoHideMenuBar) ? 1 : 0)
+                    }
+                }
             }
         }
     }
@@ -454,6 +520,7 @@ final class AppModel: ObservableObject {
         // cannot be posted from outside the process.
         if let list = env["MACVIDEOUPSCALER_CLICK_AT"] { scheduleClicks(list, count: 1) }
         if let list = env["MACVIDEOUPSCALER_DBLCLICK_AT"] { scheduleClicks(list, count: 2) }
+        if let list = env["MACVIDEOUPSCALER_MOVE_AT"] { scheduleMouseMoves(list) }
         // _SPLIT_AT="3.5:0.25,6:0.75": move the comparison divider at those
         // seconds, through the same `setCompareSplit` the slider, the menu
         // presets and a drag on the line call. Exists because the paused
@@ -488,6 +555,23 @@ final class AppModel: ObservableObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
                 let urls = paths.split(separator: "|").map { URL(fileURLWithPath: String($0)) }
                 self?.addToQueue(urls)
+            }
+        }
+    }
+
+    /// Feed the normal input monitor without needing global input permissions.
+    private func scheduleMouseMoves(_ list: String) {
+        for time in list.split(separator: ",").compactMap({ Double($0) }) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + time) { [weak self] in
+                guard let window = self?.playerView?.window,
+                      let event = NSEvent.mouseEvent(
+                        with: .mouseMoved,
+                        location: NSPoint(x: window.frame.width / 2, y: window.frame.height / 2),
+                        modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: window.windowNumber, context: nil,
+                        eventNumber: 0, clickCount: 0, pressure: 0) else { return }
+                NSApp.postEvent(event, atStart: false)
+                NSLog("[move] full=%d", self?.isFullScreen == true ? 1 : 0)
             }
         }
     }
@@ -862,6 +946,10 @@ struct PlayerCommands: Commands {
         }
 
         CommandMenu("Subtitles") {
+            Button("Load Subtitle File…") { model.openSubtitlePanel() }
+                .keyboardShortcut("o", modifiers: [.command, .option])
+                .disabled(model.currentIndex == nil || idle)
+            Divider()
             Toggle("Off", isOn: Binding(
                 get: { model.subOrdinal < 0 },
                 set: { _ in model.setSubtitleTrack(-1) }))
@@ -870,7 +958,7 @@ struct PlayerCommands: Commands {
             } else {
                 Divider()
                 ForEach(model.status.subtitleTracks) { t in
-                    Toggle(t.label, isOn: Binding(
+                    Toggle(t.index < 0 ? (t.title ?? "Subtitle file") : t.label, isOn: Binding(
                         get: { model.subOrdinal == t.ordinal },
                         set: { _ in model.setSubtitleTrack(t.ordinal) }))
                 }
@@ -895,6 +983,7 @@ struct PlayerScreen: View {
 
     @State private var chromeVisible = true
     @State private var hideWorkItem: DispatchWorkItem?
+    @State private var chromeEventMonitor: Any?
     @State private var scrub: Double?
     /// Last non-zero skip total, and whether the badge is showing: the badge holds
     /// its number through the fade-out instead of blanking to "0s".
@@ -935,11 +1024,48 @@ struct PlayerScreen: View {
                 VStack { Spacer(); note(model.status.message, .red); Spacer().frame(height: 90) }
             }
         }
-        .onContinuousHover { phase in
-            if case .active = phase { pokeChrome() }
+        .onAppear {
+            // Only real input resets the timer; SwiftUI hover can fire again
+            // when playback updates or hiding the transport changes hit testing.
+            chromeEventMonitor = NSEvent.addLocalMonitorForEvents(
+                matching: [.mouseMoved, .leftMouseDown, .rightMouseDown,
+                           .otherMouseDown, .leftMouseDragged, .rightMouseDragged,
+                           .scrollWheel, .keyDown]
+            ) { event in
+                MainActor.assumeIsolated {
+                    if let window = model.playerView?.window, event.window === window {
+                        pokeChrome()
+                    }
+                }
+                return event
+            }
+            DispatchQueue.main.async {
+                model.playerView?.window?.acceptsMouseMovedEvents = true
+                pokeChrome()
+            }
         }
-        .onAppear { pokeChrome() }
+        .onDisappear {
+            hideWorkItem?.cancel()
+            if let chromeEventMonitor { NSEvent.removeMonitor(chromeEventMonitor) }
+            chromeEventMonitor = nil
+            NSCursor.setHiddenUntilMouseMoves(false)
+        }
         .onChange(of: showQueue) { _, _ in pokeChrome() }
+        .onChange(of: model.status.state) { _, _ in pokeChrome() }
+        .onChange(of: model.isFullScreen) { _, _ in pokeChrome() }
+        .onChange(of: scrub == nil) { _, _ in pokeChrome() }
+        .onChange(of: splitDrag == nil) { _, _ in pokeChrome() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            pokeChrome()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            pokeChrome()
+        }
+        .onChange(of: chromeVisible) { _, visible in
+            if ProcessInfo.processInfo.environment["MACVIDEOUPSCALER_DIAG"] == "1" {
+                NSLog("[chrome] visible=%d full=%d", visible ? 1 : 0, model.isFullScreen ? 1 : 0)
+            }
+        }
     }
 
     /// Nothing has been shown yet: the decoders, scaler and first frame are still
@@ -1280,15 +1406,21 @@ struct PlayerScreen: View {
 
     // MARK: helpers
 
-    /// Show the transport, and hide it again after a couple of seconds of no
-    /// mouse movement — but never while paused or the queue is open.
+    /// Hide after idle playback, keeping controls available during interaction.
     private func pokeChrome() {
         chromeVisible = true
+        NSCursor.setHiddenUntilMouseMoves(false)
         hideWorkItem?.cancel()
-        guard model.status.state != .paused, !showQueue else { return }
+        guard model.status.state == .processing, !showQueue,
+              scrub == nil, splitDrag == nil else { return }
         let item = DispatchWorkItem {
-            if scrub == nil && model.status.state != .paused && !showQueue {
+            if scrub == nil && splitDrag == nil && model.status.state == .processing && !showQueue {
                 chromeVisible = false
+                if let view = model.playerView, let window = view.window,
+                   NSApp.isActive, window.isKeyWindow,
+                   view.bounds.contains(view.convert(window.mouseLocationOutsideOfEventStream, from: nil)) {
+                    NSCursor.setHiddenUntilMouseMoves(true)
+                }
             }
         }
         hideWorkItem = item

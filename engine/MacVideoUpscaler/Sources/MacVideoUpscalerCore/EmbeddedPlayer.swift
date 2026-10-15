@@ -18,6 +18,9 @@ public final class EmbeddedPlayer {
 
     private let view: PlayerView
     private var audioFormat: CMAudioFormatDescription?
+    /// Guard for the cached video format below: `makeVideoSample` runs on both
+    /// the feed thread and the video thread (paused redraw).
+    private let formatLock = NSLock()
     /// Cached video format description (one per output geometry).
     private var videoFormat: CMVideoFormatDescription?
     private var videoFormatWidth = 0
@@ -89,21 +92,27 @@ public final class EmbeddedPlayer {
     /// buffer. `pts` is seconds from the start of the current session.
     ///
     /// The format description only depends on the output dimensions, so it is
-    /// built once per geometry rather than once per frame.
+    /// built once per geometry rather than once per frame. The cache is shared
+    /// by the feed thread and the video thread's paused redraw, so it is read
+    /// and rebuilt under `formatLock`; the sample itself is built outside it.
     public func makeVideoSample(pixelBuffer: CVPixelBuffer,
                                 pts: Double, fps: Double) -> CMSampleBuffer? {
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
-        if videoFormat == nil || videoFormatWidth != width || videoFormatHeight != height {
-            var format: CMVideoFormatDescription?
+        let format: CMVideoFormatDescription? = formatLock.withLock {
+            if let cached = videoFormat, videoFormatWidth == width, videoFormatHeight == height {
+                return cached
+            }
+            var built: CMVideoFormatDescription?
             guard CMVideoFormatDescriptionCreateForImageBuffer(
                 allocator: kCFAllocatorDefault, imageBuffer: pixelBuffer,
-                formatDescriptionOut: &format) == noErr, let format else { return nil }
-            videoFormat = format
+                formatDescriptionOut: &built) == noErr, let built else { return nil }
+            videoFormat = built
             videoFormatWidth = width
             videoFormatHeight = height
+            return built
         }
-        guard let format = videoFormat else { return nil }
+        guard let format else { return nil }
         let timescale: CMTimeScale = 90000
         var timing = CMSampleTimingInfo(
             duration: CMTime(seconds: 1.0 / max(fps, 1), preferredTimescale: timescale),

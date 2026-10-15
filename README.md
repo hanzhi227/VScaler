@@ -26,6 +26,13 @@ The build script compiles a release build, assembles `dist/VScaler.app`, and sig
 
 Open a file with **⌘O**, drag it onto the app, or use **Open With** in Finder. **⇧⌘O** adds a folder recursively. New selections join the queue in filename order. Playback controls are in the menu bar and in a transport strip that appears when you move the pointer over the video. **⇧⌘S** toggles playback stats.
 
+Use **Subtitles → Load Subtitle File…** (**⌥⌘O**) to select an SRT, VTT, ASS, or SSA
+file, or either file from a VobSub `.idx`/`.sub` pair, for the current video. Keep
+the matching `.idx` and `.sub` files together. The picker starts in a neighboring
+`subs` folder when one exists. The loaded filename appears beside the embedded tracks
+in the Subtitles menu; choose **Off** to disable it. Switching videos clears the
+loaded subtitle file. ASS/SSA text is supported without its styling.
+
 The app is not notarized. macOS may ask you to use **right click → Open** the first time you launch a copy downloaded from elsewhere.
 
 ## Enhancement modes

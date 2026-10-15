@@ -1,0 +1,28 @@
+External subtitle files — 2026-10-14
+
+UI: Subtitles > Load Subtitle File… (Option-Command-O).
+Accepts SRT, VTT, ASS, and SSA. The loaded filename is selectable alongside
+embedded subtitle tracks; Off retains it for re-selection. New videos clear it.
+ASS/SSA styling is omitted by the existing text renderer.
+
+Loading parses cues off the UI thread, checks that the video still matches,
+and rebuilds playback at the current position while retaining pause intent.
+Invalid files preserve the current subtitle selection and picture.
+
+Validation:
+  swift build -c release --package-path engine/MacVideoUpscaler
+  python3 scripts/check_external_subtitles.py
+  git diff --check
+
+PASS: 11 rendered-frame checkpoints from a 640x360 synthetic black video,
+rendered at 1280x720. Verified text pixels for SRT, VTT, ASS, SSA and embedded
+subtitles; blank pixels with Off, outside cue time, and after a new video;
+identical pixels on re-selection and after failed replacement. Verified
+embedded/external menu track data, preserved pause and position, invalid-file
+errors, and clearing subtitle files on a new video. Filenames with spaces,
+a colon, and an apostrophe were included.
+
+Native file-picker interaction was not automated. Rendering was checked with
+synthetic fixtures rather than a full movie. Per-session output-buffer captures are asserted;
+display snapshots remain diagnostic because macOS can retain a stale displayed
+buffer for an occluded test window.

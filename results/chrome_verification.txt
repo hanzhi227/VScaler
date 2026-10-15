@@ -1,0 +1,41 @@
+Controls and fullscreen regression — 2026-10-14
+
+Changes:
+- Reset inactivity only on actual input, rather than SwiftUI hover callbacks.
+- Restart the timer after playback state, fullscreen, queue, or slider changes.
+- Hide controls after 2.5 idle seconds during playback; keep them during pause,
+  queue interaction, and slider drags.
+- Hide the cursor until movement only while over the active player's video.
+- Use the video window for fullscreen instead of whichever window has focus.
+- Enable app menu-bar/Dock auto-hide in fullscreen and restore presentation
+  options on exit, without changing macOS preferences.
+
+Validation:
+  swift build -c release --package-path engine/MacVideoUpscaler
+  python3 scripts/check_chrome.py
+  git diff --check
+
+Synthetic 320x180/24fps clip; Bypass 2x, silent, GUI diagnostic input hooks.
+4.12s 2026-10-14 18:42:57.833 MacVideoUpscalerApp[13391:5529627] [chrome] visible=0 full=0
+5.54s 2026-10-14 18:42:59.249 MacVideoUpscalerApp[13391:5529627] [move] full=0
+5.54s 2026-10-14 18:42:59.256 MacVideoUpscalerApp[13391:5529627] [chrome] visible=1 full=0
+7.74s 2026-10-14 18:43:01.450 MacVideoUpscalerApp[13391:5529627] [click] count=1 hit=PlayerView state=processing full=0
+12.54s 2026-10-14 18:43:06.250 MacVideoUpscalerApp[13391:5529627] [click] count=1 hit=PlayerView state=paused full=0
+15.37s 2026-10-14 18:43:09.088 MacVideoUpscalerApp[13391:5529627] [chrome] visible=0 full=0
+17.54s 2026-10-14 18:43:11.249 MacVideoUpscalerApp[13391:5529627] [move] full=0
+17.54s 2026-10-14 18:43:11.257 MacVideoUpscalerApp[13391:5529627] [chrome] visible=1 full=0
+18.54s 2026-10-14 18:43:12.251 MacVideoUpscalerApp[13391:5529627] [click] count=2 hit=PlayerView state=processing full=0
+19.12s 2026-10-14 18:43:12.838 MacVideoUpscalerApp[13391:5529627] [fullscreen] entered=1 menuAutoHide=1
+21.67s 2026-10-14 18:43:15.386 MacVideoUpscalerApp[13391:5529627] [chrome] visible=0 full=1
+23.54s 2026-10-14 18:43:17.250 MacVideoUpscalerApp[13391:5529627] [move] full=1
+23.55s 2026-10-14 18:43:17.259 MacVideoUpscalerApp[13391:5529627] [chrome] visible=1 full=1
+26.38s 2026-10-14 18:43:20.089 MacVideoUpscalerApp[13391:5529627] [chrome] visible=0 full=1
+28.74s 2026-10-14 18:43:22.450 MacVideoUpscalerApp[13391:5529627] [click] count=2 hit=PlayerView state=processing full=1
+28.74s 2026-10-14 18:43:22.455 MacVideoUpscalerApp[13391:5529627] [chrome] visible=1 full=1
+28.77s 2026-10-14 18:43:22.486 MacVideoUpscalerApp[13391:5529627] [fullscreen] entered=0 menuAutoHide=0
+32.20s 2026-10-14 18:43:25.912 MacVideoUpscalerApp[13391:5529627] [chrome] visible=0 full=0
+PASS: idle hide, mouse reveal, pause/resume, fullscreen entry/exit, menu bar restoration
+
+Native computer-use access was unavailable. Cursor rendering and the actual
+macOS menu-bar appearance were not visually inspected; fullscreen presentation
+options and their restoration were verified by the running app.

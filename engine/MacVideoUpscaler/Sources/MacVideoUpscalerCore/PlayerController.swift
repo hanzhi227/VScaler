@@ -126,7 +126,17 @@ public final class PlayerController {
     /// Called with each upscaled frame (the output pixel buffer and its session
     /// frame index), synchronously on the video thread, just before it is handed
     /// to the renderer. Diagnostic hook for frame dumps; leave nil in normal use.
-    public var onOutputFrame: ((CVPixelBuffer, Int) -> Void)?
+    ///
+    /// Reads and writes take `lock` for the access alone; the hook itself is
+    /// invoked outside it, so it can be assigned from any thread and take its
+    /// own time and locks without holding up the threads that share the
+    /// condition.
+    public var onOutputFrame: ((CVPixelBuffer, Int) -> Void)? {
+        get { lock.withLock { onOutputFrameHook } }
+        set { lock.withLock { onOutputFrameHook = newValue } }
+    }
+    /// Backing store for `onOutputFrame`. Guarded by `lock`.
+    private var onOutputFrameHook: ((CVPixelBuffer, Int) -> Void)?
 
     private let ctx: MetalContext
     private let player: EmbeddedPlayer
@@ -195,6 +205,7 @@ public final class PlayerController {
     private var probedFile: URL?
     private var audioTracks: [AudioTrack] = []
     private var subtitleTracks: [SubtitleTrack] = []
+    private var subtitleFile: (url: URL, cues: [TextSubtitleRenderer.Cue]?, tracks: [SubtitleTrack])?
 
     public init(config: Config = Config()) throws {
         signal(SIGPIPE, SIG_IGN)
@@ -365,6 +376,13 @@ public final class PlayerController {
 
     public func open(file: URL, kind: ScalerKind, startAt: Double = 0) throws {
         lock.lock()
+        if currentFile != file, subtitleFile != nil {
+            if config.subtitleStreamIndex >= subtitleTracks.count {
+                config.burnSubtitles = false
+                config.subtitleStreamIndex = 0
+            }
+            subtitleFile = nil
+        }
         currentFile = file
         self.kind = kind
         // An open is also how a stopped controller starts again; without this a
@@ -455,8 +473,23 @@ public final class PlayerController {
         var burn: SubtitleBurn?
         var textRenderer: TextSubtitleRenderer?
         if config.burnSubtitles {
-            let picked = subtitleTracks.first { $0.ordinal == config.subtitleStreamIndex } ?? subtitleTracks.first
-            if let track = picked {
+            if let subtitleFile, config.subtitleStreamIndex >= subtitleTracks.count {
+                let meta = (try? FFmpegDecoder(url: file))?.meta
+                if let cues = subtitleFile.cues {
+                    textRenderer = TextSubtitleRenderer(cues: cues,
+                                                        sourceWidth: meta?.width ?? 1920,
+                                                        sourceHeight: meta?.height ?? 1080)
+                } else {
+                    let index = config.subtitleStreamIndex - subtitleTracks.count
+                    if subtitleFile.tracks.indices.contains(index) {
+                        burn = SubtitleBurn(track: subtitleFile.tracks[index],
+                                            sourceWidth: meta?.width ?? 0,
+                                            sourceHeight: meta?.height ?? 0,
+                                            externalURL: subtitleFile.url)
+                    }
+                }
+                subtitleLabel = subtitleFile.url.lastPathComponent
+            } else if let track = subtitleTracks.first(where: { $0.ordinal == config.subtitleStreamIndex }) ?? subtitleTracks.first {
                 let probe = try? FFmpegDecoder(url: file)
                 if track.bitmap {
                     burn = SubtitleBurn(track: track, sourceWidth: probe?.meta.width ?? 0,
@@ -1002,6 +1035,49 @@ public final class PlayerController {
 
     public func setSubtitleTrack(_ ordinal: Int) { setSubtitles(true, streamIndex: max(0, ordinal)) }
 
+    /// Loads off the UI thread; a failed replacement leaves the current subtitles intact.
+    public func loadSubtitleFile(_ url: URL, for video: URL) throws {
+        lock.lock()
+        let current = currentFile
+        lock.unlock()
+        guard current != nil else {
+            throw CocoaError(.fileReadUnknown, userInfo: [NSLocalizedDescriptionKey: "Open a video before loading subtitles."])
+        }
+        var source = url
+        var cues: [TextSubtitleRenderer.Cue]?
+        var tracks: [SubtitleTrack] = []
+        let bitmap = ["idx", "sub"].contains(url.pathExtension.lowercased())
+        if url.isFileURL && bitmap {
+            source = url.deletingPathExtension().appendingPathExtension("idx")
+            let data = url.deletingPathExtension().appendingPathExtension("sub")
+            guard FileManager.default.isReadableFile(atPath: source.path),
+                  FileManager.default.isReadableFile(atPath: data.path) else {
+                throw CocoaError(.fileReadNoSuchFile, userInfo: [NSLocalizedDescriptionKey:
+                    "VobSub needs both \(source.lastPathComponent) and \(data.lastPathComponent) in the same folder. Select either file once both are present."])
+            }
+            tracks = FFmpegDecoder.probeSubtitles(url: source).filter(\.bitmap)
+        } else if url.isFileURL {
+            cues = TextSubtitleRenderer.loadCues(url: url)
+        }
+        guard cues != nil || !tracks.isEmpty else {
+            throw CocoaError(.fileReadCorruptFile, userInfo: [NSLocalizedDescriptionKey:
+                "Could not read subtitles from \(url.lastPathComponent). Choose a text subtitle file or a matching VobSub .idx/.sub pair."])
+        }
+        lock.lock()
+        guard current == video, currentFile == video else {
+            lock.unlock()
+            throw CocoaError(.fileReadUnknown, userInfo: [NSLocalizedDescriptionKey: "The video changed while loading subtitles. Select the subtitle file again."])
+        }
+        refreshTrackListsLocked()
+        subtitleFile = (source, cues, tracks)
+        config.burnSubtitles = true
+        config.subtitleStreamIndex = subtitleTracks.count
+        let pos = requestedPositionLocked()
+        pendingSeek = pos
+        lock.unlock()
+        restart(at: pos)
+    }
+
     public var availableAudioTracks: [TrackInfo] {
         lock.lock(); defer { lock.unlock() }
         return audioTrackInfos()
@@ -1020,6 +1096,17 @@ public final class PlayerController {
         if DispatchQueue.getSpecific(key: Self.sessionQueueKey) != nil {
             performStop()
         } else {
+            // Raise the flag before queueing: a restart in flight runs its
+            // up-to-10-second prebuffer wait on the session queue while holding
+            // `controlMutex`, and this call's `sync` cannot start until the
+            // restart leaves the queue either way. The wait polls `stopFlag`
+            // every few milliseconds, so setting it here ends the wait at once
+            // instead of stalling quit for the full ten seconds. `performStop`
+            // sets the flag again once it actually runs.
+            lock.lock()
+            stopFlag = true
+            lock.broadcast()
+            lock.unlock()
             sessionQueue.sync { performStop() }
         }
     }
@@ -1130,7 +1217,9 @@ public final class PlayerController {
             }
 
             let idx = s.frameIndex.value
-            onOutputFrame?(out.pb, idx)
+            // The getter only snapshots the hook under the lock; the call runs
+            // outside it.
+            if let hook = onOutputFrame { hook(out.pb, idx) }
             // The scale above was synchronous, so the GPU is done with the
             // texture. The buffer goes into the store rather than straight to the
             // layer: the feeder owns the handoff, and this frame may sit here for
@@ -1154,6 +1243,11 @@ public final class PlayerController {
         // five seconds, saying "finished" the moment the decoder runs out would
         // declare the film over while seconds of it are still queued to play.
         s.producerDone.value = true
+        // Near the end of a file the buffer can hold fewer frames than the
+        // feeder's refill watermark, which can now never fill: wake it so it
+        // plays out what is buffered and ends the session rather than waiting
+        // on the watermark forever.
+        s.store.finishProducing()
         if s.failed.value { finishSession(s) }
     }
 
@@ -1167,12 +1261,13 @@ public final class PlayerController {
     /// frames and no more (`FrameStore`), so there was nowhere for a lead to live.
     private func feedLoop(_ s: Session) {
         while true {
-            // Re-read the index each time round: the paused redraw moves it past
-            // the frames it re-queued itself.
-            let next = s.nextToFeed.value
-
+            // Read the index only after the park below: the paused redraw moves
+            // it past the frames it re-queued itself and discards whatever else
+            // the feeder may hold, so an index read before parking is stale on
+            // wake.
             if parkFeederIfNeededOrEnded(s) { break }
             if s.store.isClosed { break }
+            let next = s.nextToFeed.value
 
             // Only feed a clock that is running. The layer's queue is two frames,
             // so handing it anything while the clock is stopped (before playback,
@@ -1182,8 +1277,12 @@ public final class PlayerController {
             if !s.started.value || !player.isPlaying {
                 if s.bufferingNow.value {
                     // Held for a refill: wait for the watermark without touching
-                    // the store, then start the clock again.
-                    if !s.store.waitForCount(s.resumeFrames) { break }
+                    // the store, then start the clock again. False with the store
+                    // still open means the producer reached the end of the source
+                    // short of the watermark, so the wait can never succeed: play
+                    // out what is buffered, and the end-of-stream check below
+                    // ends the session once it is drained.
+                    if !s.store.waitForCount(s.resumeFrames) && s.store.isClosed { break }
                     endBuffering(s)
                     continue
                 }
@@ -1202,6 +1301,13 @@ public final class PlayerController {
                 continue
             }
             if !waitForLayerReady(s) { break }
+            // Parking in the wait above while paused lets the paused redraw run:
+            // it discards this frame and moves `nextToFeed` past it, so the held
+            // frame is stale. Drop it and start over rather than enqueueing it,
+            // which would show a frame rendered under the settings the viewer
+            // just changed and drag the counter backwards below the redraw's
+            // mark, leaving its re-queued frames to be fed a second time.
+            guard s.nextToFeed.value == next else { continue }
 
             guard let sample = player.makeVideoSample(pixelBuffer: frame.pb,
                                                       pts: Double(next) / max(s.fps, 1),
@@ -1401,7 +1507,7 @@ public final class PlayerController {
                                                       pts: Double(index) / fps, fps: s.fps) else { break }
             withExtendedLifetime(out.cvTexture) {}
             guard enqueueWhenReady(sample, s) else { break }
-            onOutputFrame?(out.pb, index)
+            if let hook = onOutputFrame { hook(out.pb, index) }
         }
         // These frames were just re-rendered with the new settings and handed to
         // the layer, so the copies the store is holding are stale — they were
@@ -1760,8 +1866,22 @@ public final class PlayerController {
     }
 
     private func subtitleTrackInfos() -> [TrackInfo] {
-        subtitleTracks.map { TrackInfo(index: $0.index, ordinal: $0.ordinal, codec: $0.codec,
+        var tracks = subtitleTracks.map { TrackInfo(index: $0.index, ordinal: $0.ordinal, codec: $0.codec,
                                        language: $0.language, title: $0.title, channels: nil) }
+        if let subtitleFile {
+            if subtitleFile.tracks.isEmpty {
+                tracks.append(TrackInfo(index: -1, ordinal: tracks.count, codec: "external",
+                                        title: subtitleFile.url.lastPathComponent))
+            } else {
+                for (index, track) in subtitleFile.tracks.enumerated() {
+                    let language = track.language ?? "Track \(index + 1)"
+                    tracks.append(TrackInfo(index: -(index + 1), ordinal: tracks.count,
+                                            codec: track.codec, language: track.language,
+                                            title: "\(subtitleFile.url.lastPathComponent) · \(language) #\(index + 1)"))
+                }
+            }
+        }
+        return tracks
     }
 
     /// A session that dies before its first frame is a decode failure, not EOF.

@@ -1,0 +1,37 @@
+Pause/resume regression — 2026-10-14
+
+Cause: /Applications/VScaler.app was built on September 22, before commit
+6f7a893 (September 24), which excludes paused time from the renderer stall
+watchdog. The old feeder gives up after about six seconds with a full paused
+queue, marking playback failed and disabling resume.
+
+Recent macOS logs: playback paused at 48.925 seconds, resumed at the same
+position after 66 seconds, then paused again at 54.213 seconds. Normal use did
+not log the application's failure message. Controlled reproduction below
+confirmed the installed binary fails during a pause while video=rendering.
+
+GUI reproduction (muted synthetic 1080p clip; Bypass 2x):
+  MACVIDEOUPSCALER_CLICK_AT=5,18; diagnostic output once per second.
+  Old installed app: paused at 4.14s, then failed during the pause; subsequent
+  click could not resume. Renderer remained rendering, ready=false.
+  Rebuilt app: held at 4.22s throughout 13-second pause; resumed on click;
+  processed all 240 frames and reached finished with no failed status.
+
+Release build and ad hoc bundle signature verification passed.
+
+Automated regression:
+  python3 scripts/check_pause_resume.py
+  Generated 12-second 320x180/24fps clip with a stereo 48kHz silent audio track.
+  SwiftUI-hosted playercheck, muted audio renderer, Bypass 2x.
+  Assertions: no failure; pause holds clock and audio feed; video and audio
+  advance on resume; paused seek creates a new session at 4s and holds there;
+  audio resumes after seek; natural EOF finishes successfully.
+
+pause: wall=3.0s position=2.71s state_before=processing
+resume: wall=15.0s position=2.71s state_before=paused
+pause: wall=18.0s position=5.73s state_before=processing
+seek: wall=20.0s position=5.73s state_before=paused
+resume: wall=32.0s position=4.00s state_before=paused
+PASS: 12-second pauses, audio/video resume, paused seek, and natural EOF
+
+Scope: short synthetic clips; no full-movie or enhancement-quality retest.

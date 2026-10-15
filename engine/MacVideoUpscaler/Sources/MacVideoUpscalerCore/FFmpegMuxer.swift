@@ -26,6 +26,7 @@ struct SubtitleBurn {
     let track: SubtitleTrack
     let sourceWidth: Int
     let sourceHeight: Int
+    var externalURL: URL? = nil
 }
 
 /// Wraps an ffmpeg subprocess that:

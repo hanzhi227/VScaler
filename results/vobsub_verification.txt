@@ -1,0 +1,33 @@
+VobSub external subtitles — 2026-10-14
+
+Select either .idx or .sub with Subtitles > Load Subtitle File… . The matching
+pair must share a basename and folder. The picker starts in the video's subs
+folder when present. Languages in the index appear as selectable tracks.
+
+The bitmap decoder uses the existing subtitle overlay before video scaling.
+External timestamps are offset to the current video position instead of seeking
+past an active subtitle cue. Off, re-selection, and new-video clearing use the
+same controls as embedded and external text subtitles.
+
+Validation:
+  swift build -c release --package-path engine/MacVideoUpscaler
+  python3 scripts/check_vobsub.py
+  git diff --check
+
+PASS: rendered-frame pixels for loading .idx and .sub are identical. A cue
+already active at the seek target remains visible, a gap is blank, Off removes
+it, a later cue appears, a missing companion reports both filenames without
+replacing working subtitles, and opening another video clears the subtitle file.
+The regression creates a temporary VobSub pair from the repo's local bitmap
+subtitle fixture and composites it onto synthetic black video.
+
+Also verified the user's Blade Runner .idx/.sub pair from Movies/Subs on
+synthetic black video: all three English streams rendered visible bitmap
+pixels at their cue times (2832, 21258, and 21258 bright RGB channels at 2x).
+Off returned zero bright channels. Track labels are numbered to distinguish
+streams with the same language. Native file-picker interaction was not automated.
+
+The bitmap and text regressions assert the first rendered output buffer for
+each session. Display snapshots remain diagnostic: macOS can return stale
+images or no presented buffer for an inactive/occluded test window. The harness
+also completes AppKit startup when a visible window is requested.
