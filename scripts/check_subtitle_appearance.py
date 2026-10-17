@@ -46,8 +46,8 @@ with tempfile.TemporaryDirectory(prefix="vscaler-appearance-") as directory:
     check(all(abs(row["playback_before"] - row["playback_after"]) < 0.15 for row in changes),
           "Appearance changes moved the requested position")
     captures = [row for row in events if row["event"] == "readback"]
-    images = [np.asarray(Image.open(folder / f"session_{row['session_before']:04d}_frame_0000.png").convert("RGB"))
-              for row in captures]
+    images = [np.asarray(Image.open(folder / f"displayed_{i:03d}.png").convert("RGB"))
+              for i in range(len(captures))]
     check(len(images) == 6, "Missing style checkpoints")
     default, large, small, serif, reset, off = images
     check(default.shape == (720, 1280, 3), "Subtitles were not composed at output resolution")

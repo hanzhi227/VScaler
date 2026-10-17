@@ -71,8 +71,8 @@ with tempfile.TemporaryDirectory(prefix="vscaler-subs-") as directory:
     check(any(row.get("file") == plain.name and not row.get("subtitlesEnabled") for row in rows), "Subtitles leaked to the next video")
     captures = [row for row in events if row["event"] == "readback"]
     check(len(captures) == 11, "Missing frame checkpoints")
-    images = [np.asarray(Image.open(folder / f"session_{row['session_before']:04d}_frame_0000.png").convert("RGB"))
-              for row in captures]
+    images = [np.asarray(Image.open(folder / f"displayed_{i:03d}.png").convert("RGB"))
+              for i in range(len(captures))]
     for i in (0, 2, 7, 9):
         check(images[i].max() < 10, f"Unexpected subtitles in blank frame {i}")
     for i in (1, 3, 4, 5, 6, 8, 10):

@@ -130,6 +130,10 @@ public struct StatusSnapshot: Codable {
     public var requestedScaleFactor = 2
     public var memoryFootprintMB: Double = 0
     public var message: String = ""
+    /// Set when a scrub started at the nearest keyframe instead of the clicked
+    /// time, because reaching the click would mean decoding every frame since
+    /// that keyframe. Empty when playback is where the viewer asked.
+    public var seekNotice: String = ""
 
     public init() {}
 }

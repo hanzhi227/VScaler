@@ -76,7 +76,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the verification workflow. The repo i
 ## Current limits
 
 - Playback targets SDR sources up to 1080p at 24 to 30 fps. Variable frame rate input is treated as constant frame rate.
-- Subtitles are burned into the picture before upscaling. Styled ASS/SSA subtitles are not supported with the required Homebrew ffmpeg build.
+- Subtitles are drawn over the picture, so the upscaler does not redraw the lettering. Styled ASS/SSA subtitles are not supported with the required Homebrew ffmpeg build.
 - Audio is decoded to 48 kHz stereo. If the output device disappears during playback, audio stops for that session while video continues.
 - Rendered frames can use up to 1.5 GB before the display queue and model allocations. A 1080p source scaled to 4K used about 1.69 GB total in a short playback check.
 - MetalFX Spatial can produce halos and over-sharpen soft material. Switch to another mode if the result looks wrong.

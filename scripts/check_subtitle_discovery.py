@@ -93,8 +93,8 @@ with tempfile.TemporaryDirectory(prefix="vscaler-discovery-") as directory:
     check(all(sum(track["codec"] == "dvd_subtitle" for track in row["subtitleTracks"]) == 1
               for row in merged), "Selecting .idx and .sub duplicated streams")
     captures = [row for row in events if row["event"] == "readback"]
-    images = [np.asarray(Image.open(root / f"session_{row['session_before']:04d}_frame_0000.png").convert("RGB"))
-              for row in captures]
+    images = [np.asarray(Image.open(root / f"displayed_{i:03d}.png").convert("RGB"))
+              for i in range(len(captures))]
     for index in (0, 2, 3):
         check((images[index] > 100).sum() > 500, f"Text subtitle not rendered at checkpoint {index}")
     check(np.array_equal(images[2], images[3]), "Invalid selection replaced working subtitles")

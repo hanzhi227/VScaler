@@ -54,6 +54,14 @@ public final class EmbeddedPlayer {
     ///
     /// Sessions are rebuilt off the main thread and each one sets this, so the
     /// view mutation is hopped back to the main thread.
+    /// Draws `overlay` on a copy of `base` (or a black frame of the picture size).
+    func compositedPicture(base: CVPixelBuffer?, overlay: SubtitleOverlayFrame?,
+                           fallbackWidth: Int, fallbackHeight: Int) -> CGImage? {
+        let width = base.map { CVPixelBufferGetWidth($0) } ?? fallbackWidth
+        let height = base.map { CVPixelBufferGetHeight($0) } ?? fallbackHeight
+        return FrameCapture.composite(base: base, overlay: overlay, width: width, height: height)
+    }
+
     public func setDisplayAspect(_ ratio: Double) {
         guard ratio > 0 else { return }
         DispatchQueue.main.async { [weak self] in
@@ -63,6 +71,18 @@ public final class EmbeddedPlayer {
 
     /// The layer to show in the UI.
     public func makeView() -> NSView { view }
+
+    /// Places the current cue over the picture. Safe to call from any thread;
+    /// the layer update itself runs on the main thread.
+    func setSubtitleOverlay(_ frame: SubtitleOverlayFrame?) {
+        if Thread.isMainThread {
+            view.setSubtitleOverlay(frame)
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.view.setSubtitleOverlay(frame)
+            }
+        }
+    }
 
     /// A copy of the frame the layer is showing, or nil when nothing has been
     /// presented yet (or the OS is too old to report it). This is the *presented*
@@ -319,8 +339,16 @@ final class PlayerView: NSView {
     private let comparisonLayer: AVSampleBufferDisplayLayer
     private let wipeMask = CALayer()
     private let divider = CALayer()
+    private let subtitleLayer = CALayer()
+    private var subtitleFrame: SubtitleOverlayFrame?
     private var comparing = false
     private var splitFraction: CGFloat = 0.5
+
+    /// Shows `frame` over the picture, or clears it. Call on the main thread.
+    func setSubtitleOverlay(_ frame: SubtitleOverlayFrame?) {
+        subtitleFrame = frame
+        layoutSubtitle()
+    }
 
     func setComparison(enabled: Bool, fraction: Double) {
         comparing = enabled
@@ -341,7 +369,31 @@ final class PlayerView: NSView {
         divider.isHidden = !comparing || splitFraction <= 0 || splitFraction >= 1
         divider.frame = CGRect(x: picture.minX + picture.width * splitFraction - 0.5,
                                y: picture.minY, width: 1, height: picture.height)
+        layoutSubtitle(picture: picture)
         CATransaction.commit()
+    }
+
+    private func layoutSubtitle() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layoutSubtitle(picture: Self.aspectFitRect(aspect: displayAspect, in: bounds))
+        CATransaction.commit()
+    }
+
+    private func layoutSubtitle(picture: CGRect) {
+        guard let frame = subtitleFrame, frame.videoWidth > 0, frame.videoHeight > 0, picture.width > 0 else {
+            subtitleLayer.isHidden = true
+            subtitleLayer.contents = nil
+            return
+        }
+        let sx = picture.width / CGFloat(frame.videoWidth)
+        let sy = picture.height / CGFloat(frame.videoHeight)
+        let rect = frame.rect
+        subtitleLayer.frame = CGRect(x: picture.minX + rect.minX * sx,
+                                     y: picture.minY + (CGFloat(frame.videoHeight) - rect.maxY) * sy,
+                                     width: rect.width * sx, height: rect.height * sy)
+        subtitleLayer.contents = frame.image
+        subtitleLayer.isHidden = false
     }
 
     /// Display aspect ratio (width / height) of the current video.
@@ -387,6 +439,14 @@ final class PlayerView: NSView {
         divider.backgroundColor = NSColor.white.cgColor
         divider.isHidden = true
         self.layer?.addSublayer(divider)
+        // Above both pictures and under the divider. Core Animation composites
+        // this once per cue change; the video frames stay untouched.
+        subtitleLayer.contentsGravity = .resize
+        subtitleLayer.isOpaque = false
+        subtitleLayer.magnificationFilter = .linear
+        subtitleLayer.minificationFilter = .linear
+        subtitleLayer.isHidden = true
+        self.layer?.insertSublayer(subtitleLayer, below: divider)
     }
 
     @available(*, unavailable)

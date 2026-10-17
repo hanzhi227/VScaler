@@ -257,7 +257,11 @@ func comparisonState(capturePixels: Bool) -> [String: Any] {
                 if let pb = layer.sampleBufferRenderer.displayedPixelBuffer() {
                     if flag("--dump-wipe") {
                         let file = dumpDir.appendingPathComponent(String(format: "comparison_%03d_%d.png", wipeCaptures, index))
-                        FrameCapture.writePNG(pb, to: file)
+                        if let image = controller.compositedPicture(base: pb) {
+                            FrameCapture.writePNG(image, to: file)
+                        } else {
+                            FrameCapture.writePNG(pb, to: file)
+                        }
                     }
                     CVPixelBufferLockBaseAddress(pb, .readOnly)
                     if let base = CVPixelBufferGetBaseAddress(pb) {
@@ -403,13 +407,13 @@ if let script = arg("--script") {
             // Distinct from --dump-at, which writes the frames the producer
             // rendered: those can differ from what is on screen while paused.
             case "readback":
-                if let pb = controller.displayedFrame {
+                if let image = controller.compositedPicture() {
                     let url = dumpDir.appendingPathComponent(
                         String(format: "displayed_%03d.png", readbacks))
                     readbacks += 1
-                    let ok = FrameCapture.writePNG(pb, to: url)
+                    let ok = FrameCapture.writePNG(image, to: url)
                     FileHandle.standardError.write(Data(
-                        "[readback] \(url.path) \(CVPixelBufferGetWidth(pb))x\(CVPixelBufferGetHeight(pb)) ok=\(ok)\n".utf8))
+                        "[readback] \(url.path) \(image.width)x\(image.height) ok=\(ok)\n".utf8))
                 } else {
                     FileHandle.standardError.write(Data(
                         "[readback] no presented frame active=\(app.isActive) visible=\(window?.occlusionState.contains(.visible) == true) \(controller.status.current.renderStatus)\n".utf8))
@@ -476,6 +480,7 @@ let summary: [String: Any] = [
     "memory_mb": final.memoryFootprintMB,
     "output": "\(final.outputWidth)x\(final.outputHeight)",
     "message": final.message,
+    "seek_notice": final.seekNotice,
 ]
 if let d = try? JSONSerialization.data(withJSONObject: summary, options: [.sortedKeys]) {
     FileHandle.standardOutput.write(d + Data("\n".utf8))

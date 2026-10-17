@@ -264,25 +264,163 @@ final class FFmpegDecoder {
         }
     }
 
+    /// Where a scrub should open the decoders.
+    ///
+    /// `accurate` asks ffmpeg to land on `origin` exactly, which means decoding
+    /// and discarding the frames back to the previous keyframe. That is cheap
+    /// inside one GOP and ruinous across a long one: VideoToolbox still decodes
+    /// every frame in the gap before it outputs the first, so a click near the
+    /// end of a movie whose last keyframe is at the start pegs the GPU for the
+    /// whole film. Past `maxAccurateGap`, playback starts *at* the keyframe.
+    struct SeekLanding {
+        var origin: Double
+        var accurate: Bool
+        /// Shown when `origin` is a keyframe well before the click.
+        var notice: String?
+    }
+
+    /// Furthest past a keyframe an exact seek may decode and throw away.
+    /// Measured with VideoToolbox on a 1080p long-GOP file: about 0.05 s of
+    /// decode per second of gap, and it scales with the gap, not with how the
+    /// file is indexed. Fifteen seconds covers a normal keyframe interval
+    /// (x264's default is about ten) and stops a scrub from replaying the movie.
+    static let maxAccurateGap = 15.0
+
+    /// The keyframe at or before `requested`, without decoding the gap.
+    ///
+    /// `-noaccurate_seek` makes ffmpeg emit that keyframe immediately and report
+    /// its timestamp relative to the request (negative when the keyframe is
+    /// earlier). One software frame; the hardware decoder is not started.
+    func landing(at requested: Double) -> SeekLanding {
+        let requested = max(0, requested)
+        guard requested > 0.05,
+              let keyframe = Self.keyframe(atOrBefore: requested, url: url,
+                                           streamIndex: meta.videoStreamIndex)
+        else {
+            return SeekLanding(origin: requested, accurate: true, notice: nil)
+        }
+        let gap = requested - keyframe
+        if gap <= Self.maxAccurateGap {
+            return SeekLanding(origin: requested, accurate: true, notice: nil)
+        }
+        let origin = max(0, keyframe)
+        let notice = "Jumped to \(Self.clock(origin)), the nearest point this file can skip to. "
+            + "Reaching \(Self.clock(requested)) would mean decoding every frame in between."
+        return SeekLanding(origin: origin, accurate: false, notice: notice)
+    }
+
+    /// Content time of the keyframe ffmpeg would show first for a seek to
+    /// `requested`, or nil when that cannot be learned quickly. A slow answer is
+    /// treated as a failure: waiting here would be the same grind the scrub is
+    /// trying to avoid, and the caller keeps the exact seek.
+    private static func keyframe(atOrBefore requested: Double, url: URL, streamIndex: Int) -> Double? {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: ffmpegPath)
+        p.arguments = [
+            "-hide_banner", "-nostats", "-v", "info",
+            "-noaccurate_seek",
+            "-ss", String(format: "%.3f", max(0, requested)),
+            "-i", url.path,
+            "-map", "0:\(streamIndex)",
+            "-frames:v", "1",
+            "-vf", "showinfo",
+            "-an", "-sn",
+            "-f", "null", "-",
+        ]
+        let out = Pipe()
+        let err = Pipe()
+        p.standardOutput = out
+        p.standardError = err
+        p.standardInput = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return nil }
+        // showinfo is written to stderr as the one frame is decoded. Both pipes
+        // are drained off this thread so a full buffer cannot stall the child
+        // past the timeout below.
+        let errBox = OSAllocatedUnfairLock<Data?>(initialState: nil)
+        DispatchQueue.global(qos: .utility).async {
+            let data = err.fileHandleForReading.readDataToEndOfFile()
+            errBox.withLock { $0 = data }
+        }
+        DispatchQueue.global(qos: .utility).async {
+            _ = out.fileHandleForReading.readDataToEndOfFile()
+        }
+        Subprocess.wait(for: p, timeout: 2)
+        let grace = Date().addingTimeInterval(0.5)
+        while errBox.withLock({ $0 == nil }) && Date() < grace { usleep(5_000) }
+        guard let data = errBox.withLock({ $0 }),
+              let text = String(data: data, encoding: .utf8),
+              let pts = firstPTSTime(in: text) else { return nil }
+        let keyframe = requested + pts
+        guard keyframe.isFinite else { return nil }
+        return min(max(0, keyframe), requested)
+    }
+
+    /// The first `pts_time:` showinfo prints. Negative when the frame is earlier
+    /// than the `-ss` target, which is how a keyframe seek reports itself.
+    static func firstPTSTime(in text: String) -> Double? {
+        let token = "pts_time:"
+        guard let range = text.range(of: token) else { return nil }
+        var rest = text[range.upperBound...]
+        var number = ""
+        if let sign = rest.first, sign == "+" || sign == "-" {
+            number.append(sign)
+            rest = rest.dropFirst()
+        }
+        var dot = false
+        for ch in rest {
+            if ch.isNumber {
+                number.append(ch)
+            } else if ch == ".", !dot {
+                dot = true
+                number.append(ch)
+            } else {
+                break
+            }
+        }
+        guard !number.isEmpty, number != "+", number != "-", number != "." else { return nil }
+        return Double(number)
+    }
+
+    private static func clock(_ seconds: Double) -> String {
+        let t = Int(max(0, seconds).rounded())
+        if t >= 3600 { return String(format: "%d:%02d:%02d", t / 3600, (t % 3600) / 60, t % 60) }
+        return String(format: "%d:%02d", t / 60, t % 60)
+    }
+
     /// Spawns the decoder starting at `seconds` (input seeking).
     ///
     /// Subtitles are burned in HERE, at source resolution, so the 2x upscaler
     /// sees them as picture content: glyph edges get the same line
     /// reconstruction as the rest of the frame, and text is scaled once
     /// (instead of being stretched as a bitmap over the upscaled video).
-    func start(at seconds: Double, subtitle: SubtitleBurn? = nil) throws {
+    ///
+    /// `accurate` false opens on the keyframe at `seconds` and does not decode
+    /// forward to a later timestamp. The flag has to come before `-ss`, and
+    /// `-ss` before `-hwaccel`: with the hardware decoder first, ffmpeg still
+    /// decodes the whole gap.
+    func start(at seconds: Double, accurate: Bool = true, subtitle: SubtitleBurn? = nil) throws {
         stop()
         exitBox.withLock { $0 = nil }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: Self.ffmpegPath)
-        var args = [
-            "-v", "error",
-            "-hwaccel", "videotoolbox",
-            // The rotation is applied by an explicit filter below, so ffmpeg must
-            // not also apply it — that would double it.
-            "-noautorotate",
-            "-ss", String(format: "%.3f", max(0, seconds)),
-        ]
+        let at = String(format: "%.3f", max(0, seconds))
+        var args = ["-v", "error"]
+        if accurate {
+            args += [
+                "-hwaccel", "videotoolbox",
+                // The rotation is applied by an explicit filter below, so ffmpeg must
+                // not also apply it — that would double it.
+                "-noautorotate",
+                "-ss", at,
+            ]
+        } else {
+            args += [
+                "-noaccurate_seek",
+                "-ss", at,
+                "-hwaccel", "videotoolbox",
+                "-noautorotate",
+            ]
+        }
         args += [
             "-i", url.path,
         ]

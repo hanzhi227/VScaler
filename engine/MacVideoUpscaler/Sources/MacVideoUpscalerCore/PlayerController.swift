@@ -152,6 +152,89 @@ public final class PlayerController {
         let track: SubtitleTrack?
     }
     private var subtitleFiles: [ExternalSubtitle] = []
+    /// True when the running decoder is burning a bitmap subtitle the overlay
+    /// cannot draw (PGS, DVB, XSUB). DVD and text cues never take this path.
+    private var decoderBurnsBitmap = false
+    private struct PictureGeometry {
+        var outputWidth = 0
+        var outputHeight = 0
+        var unrotatedWidth = 0
+        var unrotatedHeight = 0
+        var rotation = 0
+    }
+    private var geometry = PictureGeometry()
+    private let overlay = OverlayModel()
+    private var bitmapCache: [String: BitmapSubtitleSequence] = [:]
+    private var overlayTimer: DispatchSourceTimer?
+
+    /// Cues currently drawn above the picture. The video thread never reads this.
+    private final class OverlayModel {
+        private let lock = NSLock()
+        private var text: TextSubtitleRenderer?
+        private var bitmap: BitmapSubtitleSequence?
+        private var style = SubtitleStyle()
+        private var outputWidth = 0
+        private var outputHeight = 0
+        private var enabled = false
+
+        func replace(cues: [TextSubtitleRenderer.Cue]?, bitmap: BitmapSubtitleSequence?,
+                     style: SubtitleStyle, outputWidth: Int, outputHeight: Int, enabled: Bool) {
+            lock.lock(); defer { lock.unlock() }
+            self.style = style.normalized
+            self.outputWidth = outputWidth
+            self.outputHeight = outputHeight
+            self.enabled = enabled
+            self.bitmap = bitmap
+            if let cues, outputWidth > 0, outputHeight > 0 {
+                text = TextSubtitleRenderer(cues: cues, sourceWidth: outputWidth,
+                                            sourceHeight: outputHeight, style: style.normalized)
+            } else {
+                text = nil
+            }
+        }
+
+        func setStyle(_ style: SubtitleStyle) {
+            lock.lock(); defer { lock.unlock() }
+            let normalized = style.normalized
+            guard self.style != normalized else { return }
+            self.style = normalized
+            if let cues = text?.cues, outputWidth > 0 {
+                text = TextSubtitleRenderer(cues: cues, sourceWidth: outputWidth,
+                                            sourceHeight: outputHeight, style: normalized)
+            }
+        }
+
+        func clear() {
+            lock.lock(); defer { lock.unlock() }
+            text = nil
+            bitmap = nil
+            enabled = false
+        }
+
+        func frame(at time: Double) -> SubtitleOverlayFrame? {
+            lock.lock(); defer { lock.unlock() }
+            guard enabled, outputWidth > 0, outputHeight > 0 else { return nil }
+            if let text, let placed = text.placement(at: time) {
+                let index = text.activeCueIndex(at: time) ?? -1
+                return SubtitleOverlayFrame(image: placed.image, rect: placed.rect,
+                                            videoWidth: outputWidth, videoHeight: outputHeight,
+                                            key: "t\(index) \(outputWidth)x\(outputHeight) \(Self.key(style))")
+            }
+            if let bitmap, let placed = bitmap.placement(at: time, style: style,
+                                                         outputWidth: outputWidth, outputHeight: outputHeight) {
+                let index = bitmap.eventIndex(at: time) ?? -1
+                return SubtitleOverlayFrame(image: placed.image, rect: placed.rect,
+                                            videoWidth: outputWidth, videoHeight: outputHeight,
+                                            key: "b\(index) \(outputWidth)x\(outputHeight) \(Self.key(style))")
+            }
+            return nil
+        }
+
+        private static func key(_ style: SubtitleStyle) -> String {
+            let style = style.normalized
+            return "\(style.typeface.rawValue) \(style.size) \(style.tint.rawValue) \(style.outline.rawValue) \(style.horizontalOffset) \(style.verticalOffset)"
+        }
+    }
 
     public init(config: Config = Config()) throws {
         signal(SIGPIPE, SIG_IGN)
@@ -161,6 +244,11 @@ public final class PlayerController {
         self.player = EmbeddedPlayer(audioEnabled: config.audioEnabled, volume: config.volume)
         sessionQueue.setSpecific(key: Self.sessionQueueKey, value: ())
         status.update { $0.state = .idle }
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 0.1, repeating: 0.08)
+        timer.setEventHandler { [weak self] in self?.refreshOverlay() }
+        timer.resume()
+        overlayTimer = timer
         // Dragging the divider on the picture changes the same split the slider
         // does; both end up in `setCompareSplit`.
         player.splitFractionProvider = { [weak self] in
@@ -182,6 +270,20 @@ public final class PlayerController {
     /// The frame the renderer is showing, as a copy, or nil when nothing has been
     /// presented yet. Reports the full enhancement image, before the view's wipe mask.
     public var displayedFrame: CVPixelBuffer? { player.displayedFrame }
+
+    /// The picture the viewer sees, including the subtitle layer. Playback does
+    /// not bake the cue into the frame; this draws it on a copy for snapshots.
+    public func compositedPicture(base: CVPixelBuffer? = nil) -> CGImage? {
+        let clock: (Double, Int, Int) = {
+            lock.lock(); defer { lock.unlock() }
+            return (playbackSecondsFromLocked(), geometry.outputWidth, geometry.outputHeight)
+        }()
+        let frame = overlay.frame(at: clock.0)
+        let buffer = base ?? displayedFrame
+        let width = buffer.map { CVPixelBufferGetWidth($0) } ?? clock.1
+        let height = buffer.map { CVPixelBufferGetHeight($0) } ?? clock.2
+        return FrameCapture.composite(base: buffer, overlay: frame, width: width, height: height)
+    }
 
     /// Invoked when the viewer clicks the picture, on the main thread. The app
     /// wires this to play/pause; the engine does not decide what a click means.
@@ -210,7 +312,6 @@ public final class PlayerController {
         let outputHeight: Int
         let decoder: FFmpegDecoder
         let audio: FFmpegAudioDecoder?
-        let textRenderer: TextSubtitleRenderer?
         let srcTexture: MTLTexture
         let staging: MTLBuffer
         let pool: CVPixelBufferPool
@@ -270,7 +371,7 @@ public final class PlayerController {
         var feedThread: Thread?
 
         init(id: Int, startAt: Double, fps: Double, outputWidth: Int, outputHeight: Int,
-             decoder: FFmpegDecoder, audio: FFmpegAudioDecoder?, textRenderer: TextSubtitleRenderer?,
+             decoder: FFmpegDecoder, audio: FFmpegAudioDecoder?,
              srcTexture: MTLTexture, staging: MTLBuffer, pool: CVPixelBufferPool,
              aux: CFDictionary, textureCache: CVMetalTextureCache,
              scaler: FrameScaler, kind: ScalerKind, factor: UpscaleFactor,
@@ -283,7 +384,6 @@ public final class PlayerController {
             self.outputHeight = outputHeight
             self.decoder = decoder
             self.audio = audio
-            self.textRenderer = textRenderer
             self.srcTexture = srcTexture
             self.staging = staging
             self.pool = pool
@@ -300,12 +400,15 @@ public final class PlayerController {
 
     public func open(file: URL, kind: ScalerKind, startAt: Double = 0) throws {
         lock.lock()
-        if currentFile != file, !subtitleFiles.isEmpty {
-            if config.subtitleStreamIndex >= subtitleTracks.count {
-                config.burnSubtitles = false
-                config.subtitleStreamIndex = 0
+        if currentFile != file {
+            bitmapCache.removeAll()
+            if !subtitleFiles.isEmpty {
+                if config.subtitleStreamIndex >= subtitleTracks.count {
+                    config.burnSubtitles = false
+                    config.subtitleStreamIndex = 0
+                }
+                subtitleFiles = []
             }
-            subtitleFiles = []
         }
         currentFile = file
         self.kind = kind
@@ -324,17 +427,22 @@ public final class PlayerController {
     /// The work happens on `sessionQueue`: callers get control back immediately (a
     /// seek used to freeze the UI for most of a second), and overlapping requests
     /// queue up in order instead of re-entering each other.
-    private func restart(at target: Double) {
+    /// `snapLongGaps` is for a scrub to an arbitrary time. A relative skip or a
+    /// restart that must resume exactly where playback was leaves it false, so
+    /// those still land on the requested frame.
+    private func restart(at target: Double, snapLongGaps: Bool = false) {
         lock.lock()
         seekGeneration += 1        // supersedes a skip that is still debouncing
         let hadSkip = pendingSkipDelta != nil
         pendingSkipDelta = nil
         lock.unlock()
         if hadSkip { status.update { $0.pendingSkipSeconds = 0 } }
-        sessionQueue.async { [weak self] in self?.performRestart(at: target) }
+        sessionQueue.async { [weak self] in
+            self?.performRestart(at: target, snapLongGaps: snapLongGaps)
+        }
     }
 
-    private func performRestart(at target: Double) {
+    private func performRestart(at target: Double, snapLongGaps: Bool = false) {
         controlMutex.lock()
         defer { controlMutex.unlock() }
         // Tear the previous session down first: mark it ended, unblock its
@@ -362,6 +470,8 @@ public final class PlayerController {
         old?.audioThread?.join(timeout: 2)
         player.flush()
         player.rewindToStart()
+        overlay.clear()
+        player.setSubtitleOverlay(nil)
 
         guard let file else { return }
 
@@ -371,7 +481,7 @@ public final class PlayerController {
         // and clamping against it would silently force every start offset to 0.
         let upper = durationSeconds > 0 ? max(0, durationSeconds - 0.5) : .greatestFiniteMagnitude
         let clamped = min(max(0, target), upper)
-        beginSessionLocked(file: file, startAt: clamped)
+        beginSessionLocked(file: file, startAt: clamped, snapLongGaps: snapLongGaps)
         let fresh = session
         let consumedSkip = pendingSeek == target
         if consumedSkip {
@@ -380,11 +490,12 @@ public final class PlayerController {
         }
         lock.unlock()
         if consumedSkip { status.update { $0.pendingSkipSeconds = 0 } }
+        refreshOverlay()
         if let fresh { primeAndStart(fresh) }
     }
 
     /// Builds a session and starts its producers. Call with `lock` held.
-    private func beginSessionLocked(file: URL, startAt newStart: Double) {
+    private func beginSessionLocked(file: URL, startAt newStart: Double, snapLongGaps: Bool = false) {
         restartFlag = false
         pausedFlag = false
         stopFlag = false
@@ -392,57 +503,49 @@ public final class PlayerController {
 
         refreshTrackListsLocked()
 
-        // Subtitle burn is applied at decode time, so resolve it before starting.
-        var subtitleLabel = "off"
-        var burn: SubtitleBurn?
-        var subtitleCues: [TextSubtitleRenderer.Cue]?
-        if config.burnSubtitles {
-            let externalIndex = config.subtitleStreamIndex - subtitleTracks.count
-            if subtitleFiles.indices.contains(externalIndex) {
-                let subtitleFile = subtitleFiles[externalIndex]
-                let meta = (try? FFmpegDecoder(url: file))?.meta
-                if let cues = subtitleFile.cues {
-                    subtitleCues = cues
-                } else if let track = subtitleFile.track {
-                    burn = SubtitleBurn(track: track,
-                                        sourceWidth: meta?.width ?? 0,
-                                        sourceHeight: meta?.height ?? 0,
-                                        externalURL: subtitleFile.url)
-                }
-                subtitleLabel = subtitleFile.url.lastPathComponent
-            } else if let track = subtitleTracks.first(where: { $0.ordinal == config.subtitleStreamIndex }) ?? subtitleTracks.first {
-                let probe = try? FFmpegDecoder(url: file)
-                if track.bitmap {
-                    burn = SubtitleBurn(track: track, sourceWidth: probe?.meta.width ?? 0,
-                                        sourceHeight: probe?.meta.height ?? 0)
-                    subtitleLabel = "\(track.codec) #\(track.index) (bitmap)"
-                } else {
-                    subtitleCues = TextSubtitleRenderer.loadCues(url: file, ordinal: track.ordinal)
-                    subtitleLabel = subtitleCues == nil
-                        ? "\(track.codec) #\(track.index): no cues found"
-                        : "\(track.codec) #\(track.index) (native text render)"
-                }
-                config.subtitleStreamIndex = track.ordinal
-            } else {
-                subtitleLabel = "none found in file"
-            }
-        }
-
         if !audioTracks.contains(where: { $0.ordinal == config.audioStreamIndex }) {
             config.audioStreamIndex = 0
         }
         let hasAudio = config.audioEnabled && !audioTracks.isEmpty
 
-        let position = config.subtitleStyle.normalized
-        burn?.horizontalOffset = position.horizontalOffset
-        burn?.verticalOffset = position.verticalOffset
-
         let dec: FFmpegDecoder
+        var landingNotice: String?
+        var subtitleLabel = "off"
+        var subtitleCues: [TextSubtitleRenderer.Cue]?
+        var subtitleBitmap: BitmapSubtitleSequence?
         do {
             dec = try FFmpegDecoder(url: file)
-            try dec.start(at: startAt, subtitle: burn)
+            let quarter = dec.meta.rotation == 90 || dec.meta.rotation == 270
+            geometry.unrotatedWidth = quarter ? dec.meta.height : dec.meta.width
+            geometry.unrotatedHeight = quarter ? dec.meta.width : dec.meta.height
+            geometry.rotation = dec.meta.rotation
+            // Text and DVD cues are drawn in a layer. Only bitmap codecs this
+            // player cannot decode still go through the ffmpeg overlay, and
+            // that is the only reason the decoder is told about subtitles.
+            var built = buildOverlayLocked(file: file)
+            subtitleLabel = built.label
+            subtitleCues = built.cues
+            subtitleBitmap = built.bitmap
+            decoderBurnsBitmap = built.burn != nil
+            let position = config.subtitleStyle.normalized
+            if var burn = built.burn {
+                burn.horizontalOffset = position.horizontalOffset
+                burn.verticalOffset = position.verticalOffset
+                built.burn = burn
+            }
+            // A scrub across a long GOP must not accurate-decode every frame back
+            // to the previous keyframe. The clock then starts where the picture
+            // does, so audio and the timeline follow the frame that is shown.
+            if snapLongGaps {
+                let landing = dec.landing(at: startAt)
+                startAt = landing.origin
+                landingNotice = landing.notice
+                try dec.start(at: startAt, accurate: landing.accurate, subtitle: built.burn)
+            } else {
+                try dec.start(at: startAt, subtitle: built.burn)
+            }
         } catch {
-            status.update { $0.state = .failed; $0.message = "\(error)" }
+            status.update { $0.state = .failed; $0.message = "\(error)"; $0.seekNotice = "" }
             return
         }
         durationSeconds = dec.meta.durationSeconds
@@ -454,6 +557,7 @@ public final class PlayerController {
             status.update {
                 $0.state = .failed
                 $0.message = ScalerFactory.pinnedFactorRefusal(kind: kind, width: sw, height: sh)
+                $0.seekNotice = ""
             }
             return
         }
@@ -463,9 +567,11 @@ public final class PlayerController {
         // the scaler is a 1:1 copy.
         let ow = kind.magnifies ? sw * eff.rawValue : sw
         let oh = kind.magnifies ? sh * eff.rawValue : sh
-        let textRenderer = subtitleCues.map {
-            TextSubtitleRenderer(cues: $0, sourceWidth: ow, sourceHeight: oh, style: config.subtitleStyle)
-        }
+        geometry.outputWidth = ow
+        geometry.outputHeight = oh
+        overlay.replace(cues: subtitleCues, bitmap: subtitleBitmap,
+                        style: config.subtitleStyle, outputWidth: ow, outputHeight: oh,
+                        enabled: config.burnSubtitles && (subtitleBitmap != nil || subtitleCues != nil))
 
         var note = ""
         if !kind.magnifies {
@@ -558,7 +664,7 @@ public final class PlayerController {
 
         let s = Session(id: sessionId, startAt: startAt, fps: dec.meta.fps,
                         outputWidth: ow, outputHeight: oh, decoder: dec, audio: audio,
-                        textRenderer: textRenderer, srcTexture: srcTex, staging: staging,
+                        srcTexture: srcTex, staging: staging,
                         pool: pool, aux: aux as CFDictionary, textureCache: cache,
                         scaler: scaler, kind: kind, factor: eff, baseMessage: baseMessage,
                         store: store, resumeFrames: resumeFrames)
@@ -602,6 +708,7 @@ public final class PlayerController {
             $0.encodeBitrateBps = 0
             $0.playbackEngine = "embedded"
             $0.message = baseMessage
+            $0.seekNotice = landingNotice ?? ""
         }
 
         let vt = Thread { [weak self] in self?.videoLoop(s) }
@@ -754,7 +861,7 @@ public final class PlayerController {
         lock.lock()
         pendingSeek = target
         lock.unlock()
-        restart(at: target)
+        restart(at: target, snapLongGaps: true)
     }
 
     public func seek(by delta: Double) {
@@ -949,11 +1056,16 @@ public final class PlayerController {
             || (streamIndex != nil && config.subtitleStreamIndex != streamIndex!)
         config.burnSubtitles = enabled
         if let streamIndex { config.subtitleStreamIndex = streamIndex }
+        let burns = changed && (selectionBurnsBitmapLocked() || decoderBurnsBitmap)
         let pos = requestedPositionLocked()
-        if changed { pendingSeek = pos + 0.1 }
+        if burns { pendingSeek = pos + 0.1 }
         lock.unlock()
         guard changed else { return }
-        restart(at: pos + 0.1)
+        if burns {
+            restart(at: pos + 0.1)
+        } else {
+            sessionQueue.async { [weak self] in self?.reloadOverlay() }
+        }
     }
 
     public func setSubtitleStyle(_ style: SubtitleStyle) {
@@ -963,15 +1075,141 @@ public final class PlayerController {
         let moved = config.subtitleStyle.horizontalOffset != normalized.horizontalOffset
             || config.subtitleStyle.verticalOffset != normalized.verticalOffset
         config.subtitleStyle = normalized
-        let redraw = changed && (session?.textRenderer != nil
-            || (moved && session != nil && config.burnSubtitles))
+        let burns = changed && moved && decoderBurnsBitmap && config.burnSubtitles
         let pos = comparisonPositionLocked()
-        if redraw { pendingSeek = pos }
+        if burns { pendingSeek = pos }
         lock.unlock()
-        if redraw { restart(at: pos) }
+        guard changed else { return }
+        if burns {
+            restart(at: pos)
+            return
+        }
+        overlay.setStyle(normalized)
+        refreshOverlay()
     }
 
     public func setSubtitleTrack(_ ordinal: Int) { setSubtitles(true, streamIndex: max(0, ordinal)) }
+
+    /// Text and DVD cues swap in place. A codec that still has to be burned in
+    /// restarts, because that changes the decoder's filter graph.
+    private func reloadOverlay() {
+        lock.lock()
+        guard let file = currentFile else {
+            overlay.clear()
+            decoderBurnsBitmap = false
+            lock.unlock()
+            status.update { $0.subtitles = "off"; $0.subtitlesEnabled = false }
+            refreshOverlay()
+            return
+        }
+        let built = buildOverlayLocked(file: file)
+        if built.burn != nil {
+            lock.unlock()
+            return
+        }
+        decoderBurnsBitmap = false
+        let style = config.subtitleStyle
+        let enabled = config.burnSubtitles
+        let ordinal = config.subtitleStreamIndex
+        let tracks = subtitleTrackInfos()
+        let output = (geometry.outputWidth, geometry.outputHeight)
+        lock.unlock()
+        overlay.replace(cues: built.cues, bitmap: built.bitmap, style: style,
+                        outputWidth: output.0, outputHeight: output.1,
+                        enabled: enabled && (built.cues != nil || built.bitmap != nil))
+        status.update {
+            $0.subtitles = built.label
+            $0.subtitlesEnabled = enabled
+            $0.subtitleTracks = tracks
+            $0.subtitleTrackOrdinal = ordinal
+        }
+        refreshOverlay()
+    }
+
+    private func refreshOverlay() {
+        let time: Double = {
+            lock.lock(); defer { lock.unlock() }
+            return playbackSecondsFromLocked()
+        }()
+        player.setSubtitleOverlay(overlay.frame(at: time))
+    }
+
+    private struct BuiltOverlay {
+        var label = "off"
+        var cues: [TextSubtitleRenderer.Cue]?
+        var bitmap: BitmapSubtitleSequence?
+        var burn: SubtitleBurn?
+    }
+
+    /// Call with `lock` held.
+    private func selectionBurnsBitmapLocked() -> Bool {
+        guard config.burnSubtitles else { return false }
+        let externalIndex = config.subtitleStreamIndex - subtitleTracks.count
+        if subtitleFiles.indices.contains(externalIndex) {
+            guard let track = subtitleFiles[externalIndex].track else { return false }
+            return track.bitmap && track.codec != "dvd_subtitle"
+        }
+        guard let track = subtitleTracks.first(where: { $0.ordinal == config.subtitleStreamIndex })
+                ?? subtitleTracks.first else { return false }
+        return track.bitmap && track.codec != "dvd_subtitle"
+    }
+
+    /// Call with `lock` held. DVD bitmaps are decoded once and cached; text cues
+    /// are parsed here. Other bitmap codecs are left for the decoder to burn in.
+    private func buildOverlayLocked(file: URL) -> BuiltOverlay {
+        var built = BuiltOverlay()
+        guard config.burnSubtitles else { return built }
+        let externalIndex = config.subtitleStreamIndex - subtitleTracks.count
+        if subtitleFiles.indices.contains(externalIndex) {
+            let subtitleFile = subtitleFiles[externalIndex]
+            built.label = subtitleFile.url.lastPathComponent
+            if let cues = subtitleFile.cues {
+                built.cues = cues
+            } else if let track = subtitleFile.track {
+                if track.codec == "dvd_subtitle" {
+                    built.bitmap = cachedBitmapLocked(url: subtitleFile.url, ordinal: track.ordinal)
+                    if built.bitmap == nil { built.label += " (no cues found)" }
+                } else if track.bitmap {
+                    built.burn = SubtitleBurn(track: track, sourceWidth: geometry.unrotatedWidth,
+                                              sourceHeight: geometry.unrotatedHeight,
+                                              externalURL: subtitleFile.url)
+                }
+            }
+            return built
+        }
+        guard let track = subtitleTracks.first(where: { $0.ordinal == config.subtitleStreamIndex })
+                ?? subtitleTracks.first else {
+            built.label = "none found in file"
+            return built
+        }
+        config.subtitleStreamIndex = track.ordinal
+        if track.bitmap && track.codec != "dvd_subtitle" {
+            built.burn = SubtitleBurn(track: track, sourceWidth: geometry.unrotatedWidth,
+                                      sourceHeight: geometry.unrotatedHeight)
+            built.label = "\(track.codec) #\(track.index) (bitmap)"
+        } else if track.bitmap {
+            built.bitmap = cachedBitmapLocked(url: file, ordinal: track.ordinal)
+            built.label = built.bitmap == nil
+                ? "\(track.codec) #\(track.index): no cues found"
+                : "\(track.codec) #\(track.index) (bitmap)"
+        } else {
+            built.cues = TextSubtitleRenderer.loadCues(url: file, ordinal: track.ordinal)
+            built.label = built.cues == nil
+                ? "\(track.codec) #\(track.index): no cues found"
+                : "\(track.codec) #\(track.index) (overlay)"
+        }
+        return built
+    }
+
+    private func cachedBitmapLocked(url: URL, ordinal: Int) -> BitmapSubtitleSequence? {
+        let key = "\(url.path)#\(ordinal)#\(geometry.unrotatedWidth)x\(geometry.unrotatedHeight)#\(geometry.rotation)"
+        if let cached = bitmapCache[key] { return cached }
+        guard let sequence = BitmapSubtitleSequence.load(
+            url: url, ordinal: ordinal, unrotatedWidth: geometry.unrotatedWidth,
+            unrotatedHeight: geometry.unrotatedHeight, rotation: geometry.rotation) else { return nil }
+        bitmapCache[key] = sequence
+        return sequence
+    }
 
     /// A failed selection leaves the current subtitles intact, including multi-file loads.
     public func loadSubtitleFile(_ url: URL, for video: URL) throws {
@@ -999,10 +1237,15 @@ public final class PlayerController {
         subtitleFiles.append(contentsOf: loaded)
         config.burnSubtitles = true
         config.subtitleStreamIndex = subtitleTracks.count + firstIndex
+        let burns = selectionBurnsBitmapLocked() || decoderBurnsBitmap
         let pos = requestedPositionLocked()
-        pendingSeek = pos
+        if burns { pendingSeek = pos }
         lock.unlock()
-        restart(at: pos)
+        if burns {
+            restart(at: pos)
+        } else {
+            sessionQueue.async { [weak self] in self?.reloadOverlay() }
+        }
     }
 
     private static func readSubtitleFile(_ url: URL) throws -> [ExternalSubtitle] {
@@ -1116,10 +1359,15 @@ public final class PlayerController {
         old?.feedThread?.join(timeout: 2)
         old?.audioThread?.join(timeout: 2)
         player.stop()
+        overlay.clear()
+        player.setSubtitleOverlay(nil)
         status.update { $0.state = .idle; $0.playbackActive = false }
     }
 
-    deinit { stop() }
+    deinit {
+        overlayTimer?.cancel()
+        stop()
+    }
 
     // MARK: - Producers
 
@@ -1176,12 +1424,6 @@ public final class PlayerController {
                 left = try renderComparison(to: s, source: source)
             } catch {
                 disableComparison(s, message: "Comparison view stopped: \(error)")
-            }
-
-            if let renderer = s.textRenderer {
-                let time = s.startAt + Double(s.frameIndex.value) / max(s.fps, 1)
-                renderer.blend(into: out.pb, time: time)
-                if let left { renderer.blend(into: left.pb, time: time) }
             }
 
             let idx = s.frameIndex.value

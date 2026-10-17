@@ -82,8 +82,8 @@ with tempfile.TemporaryDirectory(prefix="vscaler-position-") as directory:
         if "bitmap" in label:
             check(any(row.get("subtitles", "").endswith(".idx") or "bitmap)" in row.get("subtitles", "")
                       for row in rows), f"{label}: bitmap track was not selected")
-        images = [np.asarray(Image.open(out / f"session_{row['session_before']:04d}_frame_0000.png").convert("RGB"))
-                  for row in captures]
+        images = [np.asarray(Image.open(out / f"displayed_{i:03d}.png").convert("RGB"))
+                  for i in range(len(captures))]
         original, moved, reset = images
         check((original > 100).sum() > 500, f"{label}: no subtitle pixels")
         height, width, _ = original.shape

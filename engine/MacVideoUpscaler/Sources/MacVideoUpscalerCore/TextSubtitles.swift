@@ -7,9 +7,11 @@ import CoreVideo
 /// libass (this Homebrew build is compiled without it, so `-vf subtitles=`
 /// does not exist on this machine).
 ///
-/// The in-app player blends cached CoreText images at output resolution after
-/// enhancement, so video models never reconstruct or distort the lettering.
-/// ASS/SSA files use their plain text cues; embedded styling is not interpreted.
+/// The in-app player draws the cached image in a layer above the picture, so
+/// the upscaler never sees the lettering and a cue is rasterised once. The
+/// stream encoder still blends into the frame, because an MPEG-TS player has
+/// no separate subtitle layer. ASS/SSA files use their plain text cues;
+/// embedded styling is not interpreted.
 final class TextSubtitleRenderer {
     struct Cue {
         let start: Double
@@ -210,6 +212,20 @@ final class TextSubtitleRenderer {
 
     func isActive(at time: Double) -> Bool { activeCueIndex(at: time) != nil }
 
+    /// Where the active cue sits in this renderer's pixel space. Origin is the
+    /// top-left of the frame and y grows downward, matching the picture buffer.
+    func placement(at time: Double) -> (image: CGImage, rect: CGRect)? {
+        guard let idx = activeCueIndex(at: time), let cg = image(for: idx) else { return nil }
+        let cgW = cg.width, cgH = cg.height
+        let bottomMargin = Int(Double(sourceHeight) * 0.05)
+        guard cgH <= sourceHeight, cgW <= sourceWidth else { return nil }
+        let desiredY = sourceHeight - bottomMargin - cgH - Int(Double(sourceHeight) * style.verticalOffset)
+        let dstY = min(sourceHeight - cgH, max(0, desiredY))
+        let desiredX = (sourceWidth - cgW) / 2 + Int(Double(sourceWidth) * style.horizontalOffset)
+        let x0 = min(sourceWidth - cgW, max(0, desiredX))
+        return (cg, CGRect(x: x0, y: dstY, width: cgW, height: cgH))
+    }
+
     /// The Metal passes have completed before the CPU writes this output buffer.
     func blend(into pixelBuffer: CVPixelBuffer, time: Double) {
         CVPixelBufferLockBaseAddress(pixelBuffer, [])
@@ -219,18 +235,16 @@ final class TextSubtitleRenderer {
               width: CVPixelBufferGetWidth(pixelBuffer), height: CVPixelBufferGetHeight(pixelBuffer), time: time)
     }
 
-    /// Blends the active cue into a BGRA output frame.
+    /// Blends the active cue into a BGRA output frame. The stream encoder uses
+    /// this; playback draws `placement(at:)` in a layer instead.
     func blend(into buffer: UnsafeMutableRawPointer, bytesPerRow: Int,
                width: Int, height: Int, time: Double) {
-        guard let idx = activeCueIndex(at: time), let cg = image(for: idx) else { return }
+        guard let placed = placement(at: time) else { return }
+        let cg = placed.image
         guard let data = cg.dataProvider?.data, let src = CFDataGetBytePtr(data) else { return }
         let cgW = cg.width, cgH = cg.height
-        let bottomMargin = Int(Double(height) * 0.05)
-        guard cgH <= height, cgW <= width else { return }
-        let desiredY = height - bottomMargin - cgH - Int(Double(height) * style.verticalOffset)
-        let dstY = min(height - cgH, max(0, desiredY))
-        let desiredX = (width - cgW) / 2 + Int(Double(width) * style.horizontalOffset)
-        let x0 = min(width - cgW, max(0, desiredX))
+        let x0 = Int(placed.rect.minX), dstY = Int(placed.rect.minY)
+        guard dstY >= 0, x0 >= 0, dstY + cgH <= height, x0 + cgW <= width else { return }
         for row in 0..<cgH {
             let sRow = UnsafeRawPointer(src + row * cgW * 4).assumingMemoryBound(to: UInt8.self)
             let dRow = (buffer + (dstY + row) * bytesPerRow + x0 * 4).assumingMemoryBound(to: UInt8.self)

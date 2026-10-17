@@ -1,0 +1,19 @@
+Playback menu shortcuts — 2026-10-14
+
+Space, the arrow seeks, and Load Subtitle Files did nothing. SwiftUI builds the
+command menus at launch, while nothing is playing. Items created with
+`.disabled(true)` keep `action=nil` and `isEnabled=false` after playback starts,
+so the key equivalent never fires and the menu row stays dead. Clicking the
+picture still paused, because that path does not go through the menu.
+
+Fix: those items are created enabled, so they keep `menuAction:`.
+`syncCommandMenus` then sets `isEnabled` and the Play/Pause title from playback
+state. Assignments happen only when the value changes.
+
+Validation (release build, synthetic clip, Bypass, muted, MACVIDEOUPSCALER_DIAG):
+  With no file open, Pause, the seek items, Previous/Next, and Load Subtitle
+  Files are enabled=false and still action=menuAction:.
+  Space pauses (playback holds, menu title becomes Play) and the next Space
+  resumes (title returns to Pause).
+  Right arrow seeks +10s.
+  python3 scripts/check_chrome.py passes.

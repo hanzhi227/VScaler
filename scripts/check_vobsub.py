@@ -76,8 +76,8 @@ with tempfile.TemporaryDirectory(prefix="vscaler-vobsub-") as directory:
                   for track in row.get("subtitleTracks", [])) for row in rows), "VobSub track missing")
     captures = [row for row in rows if row.get("event") == "readback"]
     check(len(captures) == 8, "Missing frame checkpoints")
-    images = [np.asarray(Image.open(folder / f"session_{row['session_before']:04d}_frame_0000.png").convert("RGB"))
-              for row in captures]
+    images = [np.asarray(Image.open(folder / f"displayed_{i:03d}.png").convert("RGB"))
+              for i in range(len(captures))]
     for i in (0, 2, 4, 7):
         check(images[i].max() < 10, f"Unexpected subtitle pixels in blank frame {i}")
     for i in (1, 3, 5, 6):

@@ -119,6 +119,8 @@ final class AppModel: ObservableObject {
         }
         observeFullScreen()
         applyLaunchDiagnostics()
+        // The menus exist only after this scene has been installed.
+        DispatchQueue.main.async { [weak self] in self?.syncCommandMenus() }
         observeQueueEnd()
         AppModel.instance = self
         // A file opened from the Finder can arrive before this scene exists; the
@@ -146,6 +148,7 @@ final class AppModel: ObservableObject {
             compareLeft = k
         }
         if let k = ScalerKind.allCases.first(where: { $0.displayName == snap.mode }) { kind = k }
+        syncCommandMenus()
         if snap.state == .processing && snap.realtimeRatio < 0.95 && snap.framesProcessed > 60 {
             // The stutter note is recomputed from each snapshot, so it follows
             // the live ratio. Only it may be withdrawn by a snapshot: a
@@ -407,13 +410,58 @@ final class AppModel: ObservableObject {
         if c.isPaused { c.resume() } else { c.pause() }
     }
 
+    /// SwiftUI builds the command menus once, while nothing is playing, and a menu
+    /// item it creates disabled never gains an action. The items are therefore
+    /// left enabled in `PlayerCommands`, and this pushes the real enabled state
+    /// (and the Play/Pause title) onto the items SwiftUI already installed.
+    private func syncCommandMenus() {
+        guard let main = NSApp.mainMenu else { return }
+        let playing = status.state != .idle && status.state != .failed
+        let left = String(UnicodeScalar(NSLeftArrowFunctionKey)!)
+        let right = String(UnicodeScalar(NSRightArrowFunctionKey)!)
+        if let menu = main.item(withTitle: "Playback")?.submenu {
+            for item in menu.items {
+                let mods = item.keyEquivalentModifierMask
+                    .intersection([.command, .option, .control, .shift])
+                let enabled: Bool
+                var title = item.title
+                switch (item.keyEquivalent, mods) {
+                case (" ", []):
+                    title = status.state == .paused ? "Play" : "Pause"
+                    enabled = playing
+                case (left, []), (right, []), (left, .command), (right, .command):
+                    enabled = playing
+                case (left, [.command, .option]):
+                    enabled = currentIndex != nil
+                case (right, [.command, .option]):
+                    enabled = currentIndex.map { $0 + 1 < queue.count } ?? false
+                default:
+                    guard item.title == "Go to Start" else { continue }
+                    enabled = playing
+                }
+                if item.title != title { item.title = title }
+                if item.isEnabled != enabled { item.isEnabled = enabled }
+            }
+        }
+        if let item = main.item(withTitle: "Subtitles")?.submenu?.item(withTitle: "Load Subtitle Files…") {
+            let enabled = playing && currentIndex != nil
+            if item.isEnabled != enabled { item.isEnabled = enabled }
+        }
+    }
+
     func seek(by delta: Double) {
         if ProcessInfo.processInfo.environment["MACVIDEOUPSCALER_DIAG"] == "1" {
             NSLog("[seek] request delta=%.1f from=%.2f", delta, engine?.playbackSeconds ?? -1)
         }
         engine?.seek(by: delta)
     }
-    func seek(to seconds: Double) { engine?.seek(to: seconds) }
+    func seek(to seconds: Double) {
+        if ProcessInfo.processInfo.environment["MACVIDEOUPSCALER_DIAG"] == "1" {
+            NSLog("[seek] to=%.2f from=%.2f state=%@", seconds, engine?.playbackSeconds ?? -1,
+                  status.state.rawValue)
+        }
+        engine?.seek(to: seconds)
+    }
 
     func setKind(_ k: ScalerKind) { kind = k; engine?.setKind(k) }
 
@@ -925,8 +973,6 @@ struct PlayerSurface: NSViewRepresentable {
 struct PlayerCommands: Commands {
     @ObservedObject var model: AppModel
 
-    private var idle: Bool { model.status.state == .idle || model.status.state == .failed }
-
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("Add Videos…") { model.openFilePanel() }
@@ -936,31 +982,27 @@ struct PlayerCommands: Commands {
         }
 
         CommandMenu("Playback") {
+            // No `.disabled` here. A menu item SwiftUI creates disabled keeps a nil
+            // action, so its shortcut never starts working once a video is open.
+            // The actions themselves do nothing when nothing is playing.
             Button(model.status.state == .paused ? "Play" : "Pause") { model.togglePlayPause() }
                 .keyboardShortcut(.space, modifiers: [])
-                .disabled(idle)
             Divider()
             Button("Back 10 Seconds") { model.seek(by: -10) }
                 .keyboardShortcut(.leftArrow, modifiers: [])
-                .disabled(idle)
             Button("Forward 10 Seconds") { model.seek(by: 10) }
                 .keyboardShortcut(.rightArrow, modifiers: [])
-                .disabled(idle)
             Button("Back 1 Minute") { model.seek(by: -60) }
                 .keyboardShortcut(.leftArrow, modifiers: .command)
-                .disabled(idle)
             Button("Forward 1 Minute") { model.seek(by: 60) }
                 .keyboardShortcut(.rightArrow, modifiers: .command)
-                .disabled(idle)
             Divider()
-            Button("Go to Start") { model.seek(to: 0) }.disabled(idle)
+            Button("Go to Start") { model.seek(to: 0) }
             Divider()
             Button("Previous Video") { model.previousInQueue() }
                 .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
-                .disabled(model.currentIndex == nil)
             Button("Next Video") { model.nextInQueue() }
                 .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
-                .disabled(model.currentIndex.map { $0 + 1 >= model.queue.count } ?? true)
             if !model.queue.isEmpty {
                 Menu("Queue") {
                     ForEach(model.queue.indices, id: \.self) { index in
@@ -1077,7 +1119,6 @@ struct PlayerCommands: Commands {
             Divider()
             Button("Load Subtitle Files…") { model.openSubtitlePanel() }
                 .keyboardShortcut("o", modifiers: [.command, .option])
-                .disabled(model.currentIndex == nil || idle)
             Divider()
             Toggle("Off", isOn: Binding(
                 get: { model.subOrdinal < 0 },
@@ -1091,7 +1132,7 @@ struct PlayerCommands: Commands {
                         get: { model.subOrdinal == t.ordinal },
                         set: { _ in model.setSubtitleTrack(t.ordinal) }))
                 }
-                Text("Subtitles are burned into the picture")
+                Text("Subtitles are drawn over the picture")
             }
         }
 
@@ -1177,7 +1218,7 @@ struct SubtitleAppearanceView: View {
                 }
             }
             .formStyle(.columns)
-            Text("Position applies to text and image subtitles. Font settings apply to text only; .idx/.sub files keep their original lettering.")
+            Text("Subtitles are drawn over the picture. Position applies to text and image subtitles. Font settings apply to text only; .idx/.sub files keep their original lettering.")
                 .font(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
@@ -1209,6 +1250,9 @@ struct PlayerScreen: View {
     @State private var hideWorkItem: DispatchWorkItem?
     @State private var chromeEventMonitor: Any?
     @State private var scrub: Double?
+    /// The seek queued for the end of a timeline edit. A click completes twice,
+    /// so the first one has to be cancellable.
+    @State private var scrubSeek: DispatchWorkItem?
     /// Last non-zero skip total, and whether the badge is showing: the badge holds
     /// its number through the fade-out instead of blanking to "0s".
     @State private var shownSkip: Double = 0
@@ -1239,6 +1283,17 @@ struct PlayerScreen: View {
                 if model.showStats { statsHUD }
                 Spacer(minLength: 0)
                 if chromeVisible && model.comparing && model.status.state != .idle { compareBar }
+                if chromeVisible && model.status.state != .idle && !model.status.seekNotice.isEmpty {
+                    Text(model.status.seekNotice)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.92))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(3)
+                        .padding(.horizontal, 14).padding(.vertical, 6)
+                        .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 8)
+                }
                 if chromeVisible && model.status.state != .idle { transport }
             }
 
@@ -1471,7 +1526,23 @@ struct PlayerScreen: View {
             Slider(value: Binding(get: { sliderValue }, set: { scrub = $0 }),
                    in: 0...max(model.status.durationSeconds, 1),
                    onEditingChanged: { editing in
-                       if !editing, let t = scrub { scrub = nil; model.seek(to: t) }
+                       // One click completes the edit twice: editing ends, then
+                       // immediately starts and ends again at the same value. Seeking
+                       // on both rebuilt the session twice, so the picture buffered,
+                       // started, and buffered again. The seek waits until the next
+                       // turn, and a new edit cancels the one already queued.
+                       if editing {
+                           scrubSeek?.cancel()
+                           return
+                       }
+                       guard let t = scrub else { return }
+                       scrubSeek?.cancel()
+                       let work = DispatchWorkItem {
+                           scrub = nil
+                           model.seek(to: t)
+                       }
+                       scrubSeek = work
+                       DispatchQueue.main.async(execute: work)
                    })
                 .disabled(model.status.durationSeconds <= 0)
 
