@@ -19,13 +19,13 @@ struct HostedSurface: NSViewRepresentable {
 // clock can be checked without the GUI.
 //
 //   playercheck --file <video> [--seconds 30] [--mode cnn|bypass|metalfx|realesrgan] [--scale 2|4]
-//               [--no-audio] [--seek 120] [--window] [--quiet] [--compare]
+//               [--no-audio] [--volume-leveling] [--seek 120] [--window] [--quiet] [--compare]
 //               [--buffer-seconds 5] [--buffer-mb 1500]
 //               [--script "5:pause,8:resume,12:seek:60,20:click"]
 //
 // Script verbs: pause, resume, click (a synthetic mouse click on the picture),
 // seek:<s>, seekrel:<s>, mode:<cnn|bypass|denoise|metalfx>, scale:<2|4>,
-// audio:<ordinal>, compare:<on|off>, compareleft:<cnn|denoise|bypass|metalfx>,
+// audio:<ordinal>, leveling:<on|off>, compare:<on|off>, compareleft:<cnn|denoise|bypass|metalfx>,
 // subfile:<path>, sub:<off|ordinal>, open:<path>,
 // split:<0..1>, dragdivider:<pictureFraction> (a synthetic press-and-drag),
 // wipecheck (native mask geometry and hashes of both presented full frames),
@@ -61,7 +61,7 @@ func doubleFlag(_ name: String) -> Double? {
 guard let filePath = arg("--file") else {
     FileHandle.standardError.write(Data("""
     usage: playercheck --file <video> [--seconds 30] [--mode cnn|bypass|metalfx|realesrgan|off] [--scale 2|4]
-                       [--no-audio] [--seek 120] [--window] [--quiet] [--compare]
+                       [--no-audio] [--volume-leveling] [--seek 120] [--window] [--quiet] [--compare]
                        [--buffer-seconds 5] [--buffer-mb 1500]
                        [--script "5:pause,8:resume,12:seek:60,20:click"]
     """.utf8))
@@ -87,6 +87,7 @@ if flag("--no-audio") { cfg.audioEnabled = false }
 // --mute keeps the audio path alive (decoder, timestamps, renderer) but sends it
 // to a silent output, so an audio format can be checked without playing it out.
 if flag("--mute") { cfg.volume = 0 }
+if flag("--volume-leveling") { cfg.volumeLeveling = true }
 if let v = arg("--scale") {
     guard let n = Int(v), let f = UpscaleFactor(rawValue: n) else {
         FileHandle.standardError.write(Data("--scale must be 2 or 4, got \"\(v)\"\n".utf8))
@@ -347,6 +348,7 @@ if let script = arg("--script") {
             case "seek": controller.seek(to: Double(a.value ?? "0") ?? 0)
             case "seekrel": controller.seek(by: Double(a.value ?? "0") ?? 0)
             case "mode": controller.setKind(ScalerKind.parse(a.value))
+            case "leveling": controller.setVolumeLeveling(a.value == "on")
             case "audio": controller.setAudioTrack(Int(a.value ?? "0") ?? 0)
             case "subfile":
                 do {

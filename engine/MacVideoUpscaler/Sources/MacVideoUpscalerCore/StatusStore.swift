@@ -124,6 +124,7 @@ public struct StatusSnapshot: Codable {
     public var audioTracks: [TrackInfo] = []
     public var subtitleTracks: [TrackInfo] = []
     public var audioTrackOrdinal = 0
+    public var volumeLeveling = false
     public var subtitleTrackOrdinal = 0
     /// Effective magnification (2 or 4) and what was requested before clamping.
     public var scaleFactor = 2

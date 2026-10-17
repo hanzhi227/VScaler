@@ -30,6 +30,8 @@ public final class PlayerController {
         /// Output volume, 0...1. Zero still decodes and feeds audio, so it is a
         /// mute for listening rather than a way to skip the audio path.
         public var volume: Float = 1
+        /// Compress movie dynamics and lift quiet passages during embedded playback.
+        public var volumeLeveling = false
         public var scaleFactor: UpscaleFactor = .x2
         public var burnSubtitles = false
         public var subtitleStreamIndex = 0
@@ -615,7 +617,8 @@ public final class PlayerController {
         if hasAudio {
             let a = FFmpegAudioDecoder()
             do {
-                try a.start(url: file, at: startAt, ordinal: config.audioStreamIndex)
+                try a.start(url: file, at: startAt, ordinal: config.audioStreamIndex,
+                            volumeLeveling: config.volumeLeveling)
                 audio = a
             } catch {
                 audio = nil
@@ -701,6 +704,7 @@ public final class PlayerController {
             $0.audioTracks = audioTrackInfos()
             $0.subtitleTracks = subtitleTrackInfos()
             $0.audioTrackOrdinal = config.audioStreamIndex
+            $0.volumeLeveling = config.volumeLeveling
             $0.subtitleTrackOrdinal = config.subtitleStreamIndex
             $0.scaleFactor = eff.rawValue
             $0.requestedScaleFactor = req.rawValue
@@ -1048,6 +1052,17 @@ public final class PlayerController {
         lock.unlock()
         guard changed else { return }
         restart(at: pos + 0.1)
+    }
+
+    public func setVolumeLeveling(_ enabled: Bool) {
+        lock.lock()
+        let changed = config.volumeLeveling != enabled
+        config.volumeLeveling = enabled
+        let pos = requestedPositionLocked()
+        let needsRestart = changed && session != nil
+        if needsRestart { pendingSeek = pos }
+        lock.unlock()
+        if needsRestart { restart(at: pos) }
     }
 
     public func setSubtitles(_ enabled: Bool, streamIndex: Int? = nil) {

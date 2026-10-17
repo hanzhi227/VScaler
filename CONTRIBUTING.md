@@ -59,6 +59,12 @@ Run `python3 scripts/check_pause_resume.py` after a release build to check long
 pauses, audio/video resumption, seeking while paused, and natural end of playback.
 It generates a short synthetic clip and runs the embedded player with muted audio.
 
+Run `swift test --package-path engine/MacVideoUpscaler -c release` to measure
+volume leveling against synthesized quiet and loud audio, including stereo
+balance, clipping limits, and sample counts after seeking. Then run
+`python3 scripts/check_volume_leveling.py` to check live toggles, pause/resume,
+audio-track changes, and seeking with leveling enabled.
+
 Run `python3 scripts/check_chrome.py` to check idle controls, mouse movement,
 pause/resume, and fullscreen entry/exit through the GUI's diagnostic hooks.
 It opens a silent synthetic clip for 35 seconds. Cursor rendering still needs

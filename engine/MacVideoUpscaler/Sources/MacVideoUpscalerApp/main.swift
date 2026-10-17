@@ -38,6 +38,7 @@ final class AppModel: ObservableObject {
     @Published var kind: ScalerKind = ScalerKind.defaultKind
     @Published var factor: UpscaleFactor = .x2
     @Published var audioOrdinal = 0
+    @Published var volumeLeveling = UserDefaults.standard.bool(forKey: "audio.volumeLeveling")
     /// -1 = subtitles off.
     @Published var subOrdinal = -1
     @Published var subtitleStyle: SubtitleStyle = {
@@ -104,6 +105,7 @@ final class AppModel: ObservableObject {
         playerView = view
         lastError = err
         ctrl?.config.subtitleStyle = subtitleStyle
+        ctrl?.config.volumeLeveling = volumeLeveling
         AppModel.engineForShutdown = ctrl
         ctrl?.status.on_change = { [weak self] snap in
             Task { @MainActor in self?.apply(snap) }
@@ -496,6 +498,12 @@ final class AppModel: ObservableObject {
     /// upscaled by a plain bilinear filter.
     static func compareName(_ k: ScalerKind) -> String {
         k == .bypass ? "Original (no enhancement)" : k.displayName
+    }
+
+    func setVolumeLeveling(_ enabled: Bool) {
+        volumeLeveling = enabled
+        UserDefaults.standard.set(enabled, forKey: "audio.volumeLeveling")
+        engine?.setVolumeLeveling(enabled)
     }
 
     func setAudioTrack(_ ordinal: Int) { audioOrdinal = ordinal; engine?.setAudioTrack(ordinal) }
@@ -1103,6 +1111,11 @@ struct PlayerCommands: Commands {
         }
 
         CommandMenu("Audio") {
+            Toggle("Volume Leveling", isOn: Binding(
+                get: { model.volumeLeveling },
+                set: { model.setVolumeLeveling($0) }))
+                .help("Boost quiet dialogue and soften loud effects")
+            Divider()
             if model.status.audioTracks.isEmpty {
                 Text("No audio tracks")
             } else {

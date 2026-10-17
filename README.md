@@ -26,6 +26,11 @@ The build script compiles a release build, assembles `dist/VScaler.app`, and sig
 
 Open a file with **⌘O**, drag it onto the app, or use **Open With** in Finder. **⇧⌘O** adds a folder recursively. New selections join the queue in filename order. Playback controls are in the menu bar and in a transport strip that appears when you move the pointer over the video. **⇧⌘S** toggles playback stats.
 
+Enable **Audio → Volume Leveling** for movies with quiet dialogue and loud effects.
+It boosts quiet passages and compresses loud peaks, with a limiter to prevent
+clipping. The setting is remembered across launches and starts off. Changing it
+briefly re-buffers playback at the current position, keeping a paused video paused.
+
 Use **Subtitles → Load Subtitle File…** (**⌥⌘O**) to select an SRT, VTT, ASS, or SSA
 file, or either file from a VobSub `.idx`/`.sub` pair, for the current video. Keep
 the matching `.idx` and `.sub` files together. The picker starts in a neighboring

@@ -23,6 +23,10 @@ let package = Package(
             ],
             swiftSettings: [.define("HAVE_VIDEO_UPSCALE_METAL")]
         ),
+        .testTarget(
+            name: "MacVideoUpscalerCoreTests",
+            dependencies: ["MacVideoUpscalerCore"]
+        ),
         .executableTarget(
             name: "macvideoupscale",
             dependencies: ["MacVideoUpscalerCore"]

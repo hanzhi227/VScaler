@@ -25,23 +25,34 @@ final class FFmpegAudioDecoder {
 
     /// Spawns the audio decoder starting at `seconds`, using the source's
     /// `ordinal`-th audio stream (0-based).
-    func start(url: URL, at seconds: Double, ordinal: Int) throws {
+    func start(url: URL, at seconds: Double, ordinal: Int, volumeLeveling: Bool = false) throws {
         stop()
         exitBox.withLock { $0 = nil }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: Self.ffmpegPath)
-        p.arguments = [
+        var arguments = [
             "-v", "error",
             "-ss", String(format: "%.3f", max(0, seconds)),
             "-i", url.path,
             "-map", "0:a:\(max(0, ordinal))",
             "-vn", "-sn",
+        ]
+        if volumeLeveling {
+            // Downmix first, link stereo gain, and compensate limiter lookahead
+            // so PCM frame counts still match the shared playback clock.
+            arguments += ["-af",
+                "aformat=sample_rates=48000:channel_layouts=stereo,"
+                + "acompressor=threshold=0.063:ratio=4:attack=5:release=250:makeup=2.5:link=maximum,"
+                + "alimiter=limit=0.95:level=false:latency=true"]
+        }
+        arguments += [
             "-f", "f32le",
             "-acodec", "pcm_f32le",
             "-ar", "\(Self.sampleRate)",
             "-ac", "\(Self.channelCount)",
             "pipe:1",
         ]
+        p.arguments = arguments
         p.terminationHandler = { [weak self] proc in
             self?.exitBox.withLock { $0 = proc.terminationStatus }
         }
